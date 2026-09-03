@@ -1,0 +1,133 @@
+/* -- Variabel Warna & Global Styles -- */
+:root {
+    --primary-color: #0056b3;
+    --secondary-color: #007bff;
+    --accent-color: #17a2b8;
+    --text-dark: #343a40;
+    --text-light: #f8f9fa;
+    --font-heading: 'Poppins', sans-serif;
+    --font-body: 'Lato', sans-serif;
+}
+
+body {
+    font-family: var(--font-body);
+    background-color: #f9fafb;
+    color: var(--text-dark);
+}
+
+h1, h2, h3, h4, h5, h6, .navbar-brand-text {
+    font-family: var(--font-heading);
+    font-weight: 600;
+}
+
+/* -- Navbar Kustom -- */
+.navbar-brand-text {
+    color: var(--primary-color);
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
+.nav-link-custom {
+    font-family: var(--font-heading);
+    color: #555;
+    font-weight: 600;
+    margin-left: 1rem;
+    padding: 0.5rem 1rem !important;
+    border-radius: 50px;
+    transition: all 0.3s ease;
+}
+
+.nav-link-custom:hover, .nav-link-custom:focus {
+    color: #fff;
+    background-color: var(--secondary-color);
+}
+
+.navbar-toggler {
+    border: none;
+}
+
+/* -- Hero Section / Header Halaman Depan -- */
+.hero-section {
+    padding: 6rem 0;
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: var(--text-light);
+    border-radius: 0 0 30px 30px;
+    margin-bottom: 2rem;
+}
+
+.hero-section h1 {
+    font-weight: 700;
+}
+
+/* -- Card & List Kustom -- */
+.info-card {
+    border: none;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    background-color: #fff;
+}
+
+.info-card-header {
+    display: flex;
+    align-items: center;
+    font-size: 1.5rem;
+    padding: 1rem 1.5rem;
+    font-family: var(--font-heading);
+    font-weight: 600;
+    border-bottom: 1px solid #eee;
+}
+
+.info-card-header .bi {
+    font-size: 2rem;
+    margin-right: 1rem;
+    color: var(--secondary-color);
+}
+
+.list-group-item {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid #f0f0f0;
+    transition: all 0.3s ease;
+    border-right: 5px solid transparent;
+}
+
+.list-group-item:last-child {
+    border-bottom: none;
+}
+
+.list-group-item:hover {
+    transform: translateX(10px);
+    background-color: #f8f9fa;
+    border-right-color: var(--accent-color);
+}
+
+.schedule-details h5 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.schedule-details p {
+    margin-bottom: 0;
+    font-size: 0.9rem;
+}
+
+/* -- Badge & Ikon dalam List -- */
+.badge.bg-absen {
+    font-size: 0.8rem;
+    padding: 0.4em 0.8em;
+}
+
+.icon-absen {
+    font-size: 1.2rem;
+    margin-right: 10px;
+}
+
+.photo-link {
+    font-weight: 600;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+.photo-link .bi {
+    vertical-align: middle;
+}

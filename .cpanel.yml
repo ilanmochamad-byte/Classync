@@ -1,0 +1,30 @@
+---
+# Deploy Classync ke produksi.
+#
+# ATURAN POKOK: perintah di bawah hanya MENYALIN, tidak pernah MENGHAPUS.
+# Apa pun yang tidak disebut di sini tidak akan tersentuh, yaitu:
+#   uploads/  vendor/  lib/  admin/vendor/  admin/PhpOffice/
+#   api-wa/  cache/  phpsessions/  api/uploads/
+#   .htaccess  .user.ini  php.ini   (dikelola cPanel sendiri)
+#
+# Konsekuensi: menghapus berkas dari repositori TIDAK menghapusnya dari
+# server. Setiap penghapusan harus dilakukan manual lewat File Manager.
+
+deployment:
+  tasks:
+    - export DEPLOYPATH=/DATA/k1807225/public_html/smkt.alhasan.co.id/classync
+
+    # Folder kode — isi digabungkan, berkas lama yang tak ada di repo dibiarkan
+    - /bin/mkdir -p $DEPLOYPATH/admin $DEPLOYPATH/api $DEPLOYPATH/ceses $DEPLOYPATH/css $DEPLOYPATH/guru_area $DEPLOYPATH/includes
+    - /bin/cp -Rf admin/.      $DEPLOYPATH/admin/
+    - /bin/cp -Rf api/.        $DEPLOYPATH/api/
+    - /bin/cp -Rf ceses/.      $DEPLOYPATH/ceses/
+    - /bin/cp -Rf css/.        $DEPLOYPATH/css/
+    - /bin/cp -Rf guru_area/.  $DEPLOYPATH/guru_area/
+    - /bin/cp -Rf includes/.   $DEPLOYPATH/includes/
+
+    # Berkas di akar
+    - /bin/cp -f *.php               $DEPLOYPATH/
+    - /bin/cp -f *.png               $DEPLOYPATH/
+    - /bin/cp -f privacy.html        $DEPLOYPATH/
+    - /bin/cp -f template_siswa.xlsx $DEPLOYPATH/

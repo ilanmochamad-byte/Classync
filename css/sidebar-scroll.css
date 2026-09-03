@@ -1,0 +1,32 @@
+/* Tambahkan ke file style.css yang ada atau buat file baru */
+
+.kiosk-sidebar {
+    overflow-y: auto; /* Aktifkan scroll vertikal */
+    overflow-x: hidden; /* Sembunyikan scroll horizontal */
+    max-height: 100vh; /* Maksimal tinggi sesuai viewport */
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: rgba(102, 126, 234, 0.5) transparent; /* Firefox */
+}
+
+/* Custom scrollbar untuk Webkit (Chrome, Safari, Edge) */
+.kiosk-sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.kiosk-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.kiosk-sidebar::-webkit-scrollbar-thumb {
+    background: rgba(102, 126, 234, 0.5);
+    border-radius: 3px;
+}
+
+.kiosk-sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(102, 126, 234, 0.8);
+}
+
+/* Pastikan padding tidak menghalangi scroll */
+.kiosk-sidebar {
+    padding-bottom: 2rem;
+}

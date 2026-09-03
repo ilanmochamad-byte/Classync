@@ -1,0 +1,46 @@
+# ══ Classync — aplikasi web (admin + guru_area) ══
+# Aturan: data produksi dan pustaka pihak ketiga TIDAK masuk Git.
+# Semuanya sudah ada di server dan tidak pernah disentuh proses deploy.
+
+# ── Data produksi (±1,8 GB, 4.386 berkas) ──
+/uploads/*
+!/uploads/.htaccess
+/api/uploads/*
+!/api/uploads/.htaccess
+/cache/
+/phpsessions/
+
+# ── Log & keluaran runtime ──
+error_log
+*.log
+debug_log.txt
+
+# ── Rahasia & data pribadi — JANGAN PERNAH di-commit ──
+*.sql
+config-*.php
+service-account*.json
+*.pem
+
+# ── Arsip ──
+*.zip
+*.tar.gz
+
+# ── Pustaka pihak ketiga — lihat CLAUDE.md sebelum menyentuh ini ──
+/vendor/
+/lib/
+/admin/vendor/
+/admin/PhpOffice/
+
+# ── Gateway WhatsApp: berisi sesi hidup auth_info_baileys/ ──
+/api-wa/
+
+# ── Dikelola cPanel, jangan ditimpa ──
+/.htaccess
+/.user.ini
+/php.ini
+
+# ── Sampah OS & editor ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
