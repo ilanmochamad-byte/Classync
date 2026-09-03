@@ -3,10 +3,14 @@
 header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Methods: POST");
 
-$db_host = "localhost";
-$db_user = "k1807225_user_absensi";
-$db_pass = "Smktah2017!@#";
-$db_name = "k1807225_sekolah_absensi";
+// Kredensial database dimuat dari luar webroot.
+// Berkas itu mendefinisikan $db_host, $db_user, $db_pass, $db_name.
+$config_db = '/DATA/k1807225/config/db-classync.php';
+if (!is_readable($config_db)) {
+    echo json_encode(['success' => false, 'message' => 'Konfigurasi database tidak ditemukan.']);
+    exit;
+}
+require $config_db;
 
 try {
     $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
