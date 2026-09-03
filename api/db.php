@@ -5,11 +5,13 @@ header('Content-Type: application/json');
 // Atur zona waktu
 date_default_timezone_set('Asia/Jakarta');
 
-// Konfigurasi Database
-$db_host = 'localhost';
-$db_user = 'k1807225_user_absensi';      // Ganti dengan username database Anda
-$db_pass = 'Smktah2017!@#';   // Ganti dengan password Anda
-$db_name = 'k1807225_sekolah_absensi'; // Ganti dengan nama database Anda
+$config_db = '/DATA/k1807225/config/db-classync.php';
+if (!is_readable($config_db)) {
+    http_response_code(500);
+    echo json_encode(['status' => 'error', 'message' => 'Koneksi ke database gagal.']);
+    exit;
+}
+require $config_db;
 
 // Buat Koneksi
 $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
