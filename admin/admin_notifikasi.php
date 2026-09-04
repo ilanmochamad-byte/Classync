@@ -9,11 +9,13 @@ $serviceAccountKeyPath = '/DATA/k1807225/credentials/classyncapp-9a6b6-firebase-
 // ID Proyek Firebase Anda
 $projectId = 'classyncapp-9a6b6'; // GANTI JIKA BERBEDA
 
-// Database
-$db_host = "localhost";
-$db_user = "k1807225_user_absensi";
-$db_pass = "Smktah2017!@#";
-$db_name = "k1807225_sekolah_absensi";
+// Database — kredensial dimuat dari luar webroot.
+// Berkas itu mendefinisikan $db_host, $db_user, $db_pass, $db_name.
+$config_db = '/DATA/k1807225/config/db-classync.php';
+if (!is_readable($config_db)) {
+    die("Koneksi database gagal: konfigurasi tidak ditemukan.");
+}
+require $config_db;
 // --------------------
 
 // Sertakan autoloader dari Composer
