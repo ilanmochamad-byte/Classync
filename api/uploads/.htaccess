@@ -1,0 +1,22 @@
+# Folder unggahan — tidak ada satu pun berkas di sini yang boleh dieksekusi.
+# Isinya foto absensi. Tidak ada skrip yang sah di dalamnya.
+#
+# CATATAN: folder ini ikut tersalin lewat "cp -Rf api/." di .cpanel.yml,
+# tapi tetap buat salinannya lewat File Manager agar berlaku segera.
+
+
+# 1. Cabut handler PHP. Server memakai LiteSpeed dengan AddHandler,
+#    jadi handler-nya perlu dilepas secara eksplisit.
+<IfModule mime_module>
+    RemoveHandler .php .php3 .php4 .php5 .php7 .php8 .phtml .phar
+    RemoveType .php .php3 .php4 .php5 .php7 .php8 .phtml .phar
+    AddType text/plain .php .phtml .phar
+</IfModule>
+
+# 2. Tolak akses langsung ke berkas yang bisa dieksekusi, apa pun handlernya.
+<FilesMatch "\.(php|php[0-9]|phtml|phar|pl|py|cgi|sh|shtml|asp|aspx|jsp)$">
+    Require all denied
+</FilesMatch>
+
+# 3. Matikan CGI dan daftar isi direktori.
+Options -ExecCGI -Indexes
