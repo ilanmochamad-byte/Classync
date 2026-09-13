@@ -35,6 +35,11 @@ laptop  →  git push  →  GitHub  →  cPanel "Update from Remote"  →  "Depl
 menghapusnya dari server — itu harus dilakukan manual lewat File Manager cPanel.
 Aturan yang sama inilah yang melindungi 1,8 GB foto absensi.
 
+**Menguji dari server.** WAF menolak User-Agent `curl`, sehingga `curl -sI`
+menghasilkan 403 untuk apa pun — termasuk berkas yang sah dan berkas yang
+tidak ada. Sertakan `-A` dengan User-Agent peramban, atau hasilnya
+menyesatkan.
+
 ## Tiga repositori yang bekerja bersama
 
 | Folder | Isi | Deploy |
@@ -117,14 +122,6 @@ memerlukan deploy kode sama sekali.
 
 ### Masih terbuka
 
-- **Tinggi** — `ini_set('display_errors', 1)` menyala di **57 berkas**
-  (45 di repo API, 12 di sini). Inilah yang mengubah kesalahan kecil jadi
-  mudah dieksploitasi dan membocorkan jalur berkas serta potongan query.
-  `.htaccess` dan php.ini **tidak bisa** mematikannya — `ini_set()` saat
-  runtime selalu menang, jadi barisnya harus dicabut dari kode.
-- **Tinggi** — dump `.sql`, `proxy-log.txt`, `*.zip`, `error_log` kemungkinan
-  masih ada di dalam webroot dan bisa diunduh siapa pun. Belum didata:
-  jalankan `find` dulu, jangan hapus tanpa melihat daftarnya.
 - **Sedang** — unggahan foto tanpa daftar putih ekstensi di
   `proses_absen_mengajar.php`, `proses_absen_sederhana.php`,
   `proses_absen_bk.php` (ketiganya di repo API). Pola yang benar ada di
@@ -162,6 +159,30 @@ memerlukan deploy kode sama sekali.
 - ~~Berkas kembar `guru-area`, `loginguru.php`, `guru_area/index2.php`,
   `api/backup/`~~ — dihapus dari repo (commit `f92eac3`) dan dari server,
   bersama `index3.php`, `index-not.php`, `laporan_honor_salah.php`.
+- ~~`display_errors` menyala di 54 berkas~~ — diganti `'0'` di 9 berkas repo
+  ini (commit `432d912`) dan 45 berkas repo API (commit `6542b62`), dua tahap
+  dengan deploy dan uji terpisah. Yang diganti potongan nilainya, bukan
+  barisnya: 12 berkas di repo API menaruh `error_reporting(E_ALL)` di baris
+  yang sama, sehingga menghapus barisnya akan ikut mematikan pencatatan ke
+  log. `error_reporting(E_ALL)` sengaja dibiarkan menyala di semuanya.
+- ~~Log, dump, dan arsip bisa diunduh dari webroot~~ — semuanya dihapus
+  13 September 2026. Tapi yang bertahan bukan penghapusannya, melainkan blok
+  ini, ditambahkan **di bawah** blok buatan cPanel pada `.htaccess` akar
+  `smkt.alhasan.co.id/classync/` dan `api.smkt.alhasan.co.id/`:
+
+      <FilesMatch "^(error_log|.*\.log|proxy-log\.txt|debug_log\.txt|.*\.sql|.*\.zip|.*\.bak)$">
+          Require all denied
+      </FilesMatch>
+
+  `error_log` lahir lagi setiap kali ada galat — blok inilah yang membuatnya
+  tidak bisa diunduh. **Jangan dihapus.** Terverifikasi: `uji.log` → 403,
+  `classync.png` → 200.
+- ~~Izin berkas terlalu longgar~~ — `admin/` dari 0777 jadi 0755;
+  `absen_ekskul.php`, `absen_mengajar.php`, `absen_piket.php` dari 0666 jadi
+  0644. Hanya di server; izin tidak ikut Git, jadi tidak ada jejaknya di repo.
+- ~~Perancah pengembang di webroot~~ — `test-tcpdf.php` dan
+  `debug_absen_manual.php` dihapus dari repo (commit `432d912`) dan dari
+  server. Keduanya mencetak keluaran debug dan bisa dibuka siapa pun.
 
 ## Yang sudah tidak dipakai atau sudah rusak
 
