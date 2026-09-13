@@ -1,7 +1,7 @@
 <?php
 // --- AWAL KODE DEBUG ---
 // Baris ini akan memaksa PHP untuk menampilkan SEMUA error ke layar
-ini_set('display_errors', 1);
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 // --- AKHIR KODE DEBUG ---
 
