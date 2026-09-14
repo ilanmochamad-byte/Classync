@@ -244,7 +244,7 @@ $result = $stmt->get_result();
                     <td><?php echo htmlspecialchars($row['keterangan_jadwal']); ?></td>
                     <td><span class="badge bg-<?php echo $row['status'] == 'Hadir' ? 'success' : 'danger'; ?>"><?php echo htmlspecialchars($row['status']); ?></span></td>
                     <td><?php echo htmlspecialchars($row['keterangan']); ?></td>
-                    <td><?php if($row['foto_bukti']): ?><a href="../<?php echo $row['foto_bukti']; ?>" target="_blank">Lihat</a><?php else: ?>-<?php endif; ?></td>
+                    <td><?php if($row['foto_bukti']): ?><a href="../<?php echo htmlspecialchars($row['foto_bukti']); ?>" target="_blank">Lihat</a><?php else: ?>-<?php endif; ?></td>
                     <td>
                         <button class="btn btn-sm btn-warning btn-edit" data-bs-toggle="modal" data-bs-target="#editAbsenModal"
                                 data-id="<?php echo $row['id']; ?>"

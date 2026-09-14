@@ -260,8 +260,8 @@ $list_absensi = $stmt_data->get_result();
                         <td><?php echo $row['waktu_masuk'] ?? '-'; ?></td>
                         <td><span class="badge bg-<?php echo $row['status_masuk'] == 'Terlambat' ? 'danger' : 'success'; ?>"><?php echo $row['status_masuk']; ?></span></td>
                         <td><?php echo $row['waktu_pulang'] ?? '-'; ?></td>
-                        <td><?php if($row['foto_masuk']) { ?><a href="../<?php echo $row['foto_masuk']; ?>" target="_blank">Lihat</a><?php } else { echo '-'; } ?></td>
-                        <td><?php if($row['foto_pulang']) { ?><a href="../<?php echo $row['foto_pulang']; ?>" target="_blank">Lihat</a><?php } else { echo '-'; } ?></td>
+                        <td><?php if($row['foto_masuk']) { ?><a href="../<?php echo htmlspecialchars($row['foto_masuk']); ?>" target="_blank">Lihat</a><?php } else { echo '-'; } ?></td>
+                        <td><?php if($row['foto_pulang']) { ?><a href="../<?php echo htmlspecialchars($row['foto_pulang']); ?>" target="_blank">Lihat</a><?php } else { echo '-'; } ?></td>
                         <td>
                             <div class="btn-group btn-group-sm me-1" role="group">
                                 <button type="button" class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" title="Kirim Ulang WA">

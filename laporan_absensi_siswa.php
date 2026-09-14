@@ -161,8 +161,8 @@ $list_absensi = $stmt_data->get_result();
                         <td><?php echo $row['waktu_masuk']; ?></td>
                         <td><span class="badge bg-<?php echo $row['status_masuk'] == 'Terlambat' ? 'danger' : 'success'; ?>"><?php echo $row['status_masuk']; ?></span></td>
                         <td><?php echo $row['waktu_pulang'] ?? '-'; ?></td>
-                        <td><a href="../<?php echo $row['foto_masuk']; ?>" target="_blank">Lihat</a></td>
-                        <td><?php if($row['foto_pulang']) { ?><a href="../<?php echo $row['foto_pulang']; ?>" target="_blank">Lihat</a><?php } else { echo '-'; } ?></td>
+                        <td><a href="../<?php echo htmlspecialchars($row['foto_masuk']); ?>" target="_blank">Lihat</a></td>
+                        <td><?php if($row['foto_pulang']) { ?><a href="../<?php echo htmlspecialchars($row['foto_pulang']); ?>" target="_blank">Lihat</a><?php } else { echo '-'; } ?></td>
                         <td>
                             <button class="btn btn-sm btn-warning btn-edit" data-bs-toggle="modal" data-bs-target="#editAbsenSiswaModal"
                                     data-id="<?php echo $row['id']; ?>"
