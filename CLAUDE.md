@@ -122,23 +122,31 @@ memerlukan deploy kode sama sekali.
 
 ### Masih terbuka
 
-- **Sedang** — unggahan foto tanpa daftar putih ekstensi di
-  `proses_absen_mengajar.php`, `proses_absen_sederhana.php`,
-  `proses_absen_bk.php` (ketiganya di repo API). Pola yang benar ada di
-  `absensi_pkl.php` (`getimagesize()`). Turun dari Kritis karena `.htaccess`
-  di folder unggahan sudah melumpuhkan eksekusi — tapi berkas non-gambar
-  masih bisa tersimpan.
+- **Sedang** — lima jalur unggah di repo ini menerima berkas tanpa memeriksa
+  isinya: `admin/siswa.php:63`, `admin/proses_edit_profil.php:33`,
+  `admin/absensi_manual.php:46` dan `:84`, serta
+  `guru_area/proses_edit_profil.php:33` (folder mati). Tiga yang pertama
+  halaman admin yang dipakai TU sehari-hari. Keparahannya di bawah endpoint
+  API yang sudah ditutup, karena semuanya menuntut sesi admin lebih dulu.
+  Lima jalur lain (`absensi_pkl.php`, `guru_area/absen.php`,
+  `guru_area/proses_absen.php`, `api/profil.php`, `api/absen.php`) sudah
+  memakai `getimagesize()` tapi ekstensinya masih dari klien — terlindungi
+  sebagian, belum kebal polyglot. Pola yang benar ada di repo API, `6c77656`.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
   percobaan, tanpa token CSRF di form admin.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
   sudah menyediakan `$conn`.
 - **Sedang** — zona waktu di ClassyncApp: `date.toISOString()` menghasilkan
   UTC, jadi antara 00.00-07.00 WIB tanggal yang dikirim mundur satu hari.
-  Ada di `monitoring_siswa.tsx:96`, `refleksi.tsx:151`, `buat_jurnal.tsx:95`,
-  `pengajuan_absensi.tsx:254` — tiga yang terakhir **menulis** tanggal ke
-  basis data, dan itu bersinggungan dengan honor. Pola yang benar ada di
-  berkas yang sama: `absen-siswa.tsx:106` (`getLocalDateString()`).
-  Butuh rilis toko.
+  **Sudah diperbaiki di sumber** — commit `26576d8`, penolong di
+  `utils/tanggal.ts` — tapi belum sampai ke guru: tidak ada OTA, jadi butuh
+  build EAS dan tinjauan toko. Sampai rilis mendarat, versi lama tetap
+  mengirim tanggal mundur dan basis data menerima campuran keduanya.
+- **Rendah** — blok `catch` di keempat endpoint unggah repo API mengirim
+  `$e->getMessage()` mentah ke aplikasi. Pesannya biasanya pesan aplikasi yang
+  berguna bagi guru ("Foto bukti wajib diupload"), tapi eksepsi basis data
+  bocor lewat jalur yang sama. Memperbaikinya berarti memisahkan eksepsi
+  aplikasi dari eksepsi sistem.
 
 ### Sudah ditutup
 
@@ -183,6 +191,15 @@ memerlukan deploy kode sama sekali.
 - ~~Perancah pengembang di webroot~~ — `test-tcpdf.php` dan
   `debug_absen_manual.php` dihapus dari repo (commit `432d912`) dan dari
   server. Keduanya mencetak keluaran debug dan bisa dibuka siapa pun.
+- ~~Unggahan foto tanpa daftar putih di repo API~~ — commit `6c77656`, empat
+  berkas: ketiga endpoint absen ditambah `update_profil_guru.php`. Yang
+  menutup lubangnya bukan `getimagesize()`, melainkan asal ekstensinya:
+  diambil dari `$info[2]`, tipe yang terdeteksi, bukan dari nama kiriman
+  klien. Polyglot yang lolos `getimagesize()` tetap tersimpan sebagai `.jpg`.
+  Lebih ketat daripada `absensi_pkl.php` yang jadi rujukan audit. WEBP
+  diizinkan meski sensus 1.896 foto produksi hanya menemukan 1.203 `.jpeg`,
+  687 `.jpg`, 6 `.png`, dan nol HEIC. Terverifikasi di produksi lewat pola
+  nama berkas yang baru.
 
 ## Yang sudah tidak dipakai atau sudah rusak
 
