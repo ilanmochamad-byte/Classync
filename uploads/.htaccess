@@ -5,18 +5,28 @@
 # ter-deploy. Salinan di server harus dibuat dan diperbarui lewat File Manager.
 # Berkas di repo ini hanya arsip berversi.
 
-# 1. Cabut handler PHP. Server memakai LiteSpeed dengan AddHandler,
-#    jadi handler-nya perlu dilepas secara eksplisit.
+# 1. Cabut handler PHP dan SSI. Argumen ekstensi mod_mime TIDAK peka huruf,
+#    jadi .PHP ikut tercabut. Ini juga satu-satunya lapis yang menjangkau
+#    nama multi-ekstensi seperti foto.php.jpg — FilesMatch tidak melihatnya
+#    karena hanya mencocokkan ekstensi terakhir.
 <IfModule mime_module>
-    RemoveHandler .php .php3 .php4 .php5 .php7 .php8 .phtml .phar
-    RemoveType .php .php3 .php4 .php5 .php7 .php8 .phtml .phar
-    AddType text/plain .php .phtml .phar
+    RemoveHandler .php .php3 .php4 .php5 .php7 .php8 .phtml .phar .shtml .shtm
+    RemoveType .php .php3 .php4 .php5 .php7 .php8 .phtml .phar .shtml .shtm
+    AddType text/plain .php .phtml .phar .shtml .shtm
 </IfModule>
 
-# 2. Tolak akses langsung ke berkas yang bisa dieksekusi, apa pun handlernya.
-<FilesMatch "\.(php|php[0-9]|phtml|phar|pl|py|cgi|sh|shtml|asp|aspx|jsp)$">
+# 2. Cabut penyaring SSI. RemoveHandler tidak menyentuhnya.
+<IfModule mod_include.c>
+    RemoveOutputFilter .shtml .shtm .html .htm
+</IfModule>
+
+# 3. Tolak akses langsung ke berkas yang bisa dieksekusi, apa pun handlernya.
+#    (?i) wajib: FilesMatch peka huruf besar-kecil secara bawaan, tidak
+#    seperti argumen mod_mime di atas.
+<FilesMatch "(?i)\.(php|php[0-9]|phtml|phar|pl|py|cgi|sh|shtml|shtm|asp|aspx|jsp)$">
     Require all denied
 </FilesMatch>
 
-# 3. Matikan CGI dan daftar isi direktori.
-Options -ExecCGI -Indexes
+# 4. Matikan CGI, SSI, dan daftar isi direktori.
+#    -Includes bukan bagian dari -ExecCGI; keduanya harus disebut.
+Options -ExecCGI -Indexes -Includes -IncludesNOEXEC
