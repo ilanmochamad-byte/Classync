@@ -340,13 +340,13 @@ $tanggal_tampil = $hari[date('l')] . ", " . date('d') . " " . $bulan[(int)date('
                                 <td class="text-center">
                                     <strong class="text-success d-block"><?php echo $masuk_fmt; ?></strong>
                                     <?php if($rw['foto_masuk'] && file_exists($rw['foto_masuk'])): ?>
-                                        <img src="<?php echo htmlspecialchars($rw['foto_masuk']); ?>" class="thumb-history border shadow-sm mt-1" onclick="showModalFoto(<?php echo json_encode($rw['foto_masuk'], JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP); ?>)">
+                                        <img src="<?php echo htmlspecialchars($rw['foto_masuk']); ?>" class="thumb-history border shadow-sm mt-1" onclick="showModalFoto(<?php echo htmlspecialchars(json_encode($rw['foto_masuk']), ENT_QUOTES, 'UTF-8'); ?>)">
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-center">
                                     <strong class="text-primary d-block"><?php echo $pulang_fmt; ?></strong>
                                     <?php if($rw['foto_pulang'] && file_exists($rw['foto_pulang'])): ?>
-                                        <img src="<?php echo htmlspecialchars($rw['foto_pulang']); ?>" class="thumb-history border shadow-sm mt-1" onclick="showModalFoto(<?php echo json_encode($rw['foto_pulang'], JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP); ?>)">
+                                        <img src="<?php echo htmlspecialchars($rw['foto_pulang']); ?>" class="thumb-history border shadow-sm mt-1" onclick="showModalFoto(<?php echo htmlspecialchars(json_encode($rw['foto_pulang']), ENT_QUOTES, 'UTF-8'); ?>)">
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-center pe-4">
