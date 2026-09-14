@@ -120,8 +120,37 @@ memerlukan deploy kode sama sekali.
 
 ## Temuan audit
 
+Daftar ini ditinjau audit independen pada 14 September 2026, di luar pekerjaan
+yang menghasilkannya. Audit itu menemukan tiga temuan yang tidak pernah
+terdaftar sebelumnya — dua di antaranya Kritis — dan mengoreksi tiga klaim
+yang sempat tertulis di dokumen ini sebagai fakta. Koreksinya dicatat di butir
+masing-masing. Pelajarannya: klaim keamanan yang tidak diuji langsung cenderung
+terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
+
 ### Masih terbuka
 
+- **Kritis** — endpoint absen di repo API tidak menuntut autentikasi sama
+  sekali. Siapa pun yang mengirim `guru_id`, `jadwal_id`, dan satu gambar sah
+  ke `proses_absen_mengajar.php`, `proses_absen_sederhana.php`, atau
+  `proses_absen_bk.php` akan tercatat hadir — dan baris itu ikut dihitung
+  sebagai honor. `proses_absen_sederhana.php` bahkan tidak memastikan jadwal
+  yang dikirim milik guru tersebut. Ini proyek migrasi token empat fase yang
+  dikunci di `CLAUDE.md` repo API; jangan menegakkan autentikasi tanpa
+  melewati keempat fasenya, karena aplikasi versi lama akan mati.
+- **Tinggi** — `admin/approval_absensi.php` tidak idempoten. Halaman itu tidak
+  memastikan status masih `Pending` dan tidak memeriksa duplikat, sehingga
+  admin yang menekan "Disetujui" dua kali — atau peramban yang mengulang POST
+  yang sama — memasukkan baris `absensi` baru setiap kali. Honor mengajar,
+  piket, dan ekskul dihitung per baris, jadi hasilnya honor ganda. Perbaikannya
+  menuntut transaksi, `SELECT ... FOR UPDATE`, perubahan status bersyarat, dan
+  batasan unik di basis data. Ini temuan yang paling sulit terlihat: tidak ada
+  gejala sampai slip gaji keluar.
+- **Tinggi** — tidak ada batas ukuran berkas unggahan. `upload_max_filesize`
+  100 MB, `getimagesize()` hanya perlu membaca header, dan endpointnya tanpa
+  autentikasi — seratus permintaan JPEG sah berpadding bisa memakan hampir
+  10 GB. Perbaikannya: batas eksplisit sekitar 5 MB sebelum `getimagesize()`,
+  samakan `post_max_size`, dan pertimbangkan re-encode gambar untuk membuang
+  muatan yang menempel di belakang.
 - **Sedang** — lima jalur unggah di repo ini menerima berkas tanpa memeriksa
   isinya: `admin/siswa.php:63`, `admin/proses_edit_profil.php:33`,
   `admin/absensi_manual.php:46` dan `:84`, serta
@@ -142,11 +171,21 @@ memerlukan deploy kode sama sekali.
   `utils/tanggal.ts` — tapi belum sampai ke guru: tidak ada OTA, jadi butuh
   build EAS dan tinjauan toko. Sampai rilis mendarat, versi lama tetap
   mengirim tanggal mundur dan basis data menerima campuran keduanya.
+- **Sedang** — `proses_absen_bk.php` mencatat absensi walau unggah foto gagal.
+  Blok `if ($_FILES['foto_bukti']['error'] == 0)` tidak punya `else`, jadi
+  galat seperti `UPLOAD_ERR_INI_SIZE` dilewati diam-diam dan barisnya tersimpan
+  dengan `foto_bukti` kosong. Dua endpoint absen lain melempar Exception dalam
+  keadaan yang sama. Perlu putusan lebih dulu: apakah foto memang wajib.
 - **Rendah** — blok `catch` di keempat endpoint unggah repo API mengirim
   `$e->getMessage()` mentah ke aplikasi. Pesannya biasanya pesan aplikasi yang
   berguna bagi guru ("Foto bukti wajib diupload"), tapi eksepsi basis data
   bocor lewat jalur yang sama. Memperbaikinya berarti memisahkan eksepsi
   aplikasi dari eksepsi sistem.
+- **Rendah** — `app/absen_hp_backup.tsx:115` dan `:167` di ClassyncApp masih
+  memakai `toISOString()`. Namanya terdengar seperti berkas cadangan, tapi di
+  Expo Router **setiap berkas di `app/` adalah rute hidup** — `/absen_hp_backup`
+  bisa dibuka. Generator `scripts/generate_absen_hp.py:238` dan `:279` juga
+  dapat menghidupkan kembali pola yang sama.
 
 ### Sudah ditutup
 
@@ -155,11 +194,36 @@ memerlukan deploy kode sama sekali.
   mentah ke pemanggil. Sapuan ulang seluruh repo API tidak menemukan endpoint
   kedua dengan pola yang sama.
 - ~~Tidak ada `.htaccess` di folder unggahan~~ — dibuat di `uploads/` dan
-  `api/uploads/`, terverifikasi 403. **Bukan** `php_flag engine off` seperti
-  saran audit lama: server ini LiteSpeed dengan `AddHandler`, jadi yang
-  berlaku `RemoveHandler` + `FilesMatch` + `Options -ExecCGI -Indexes`.
+  `api/uploads/`, lalu diperketat lagi lewat commit `d7cee63` setelah audit.
+  **Bukan** `php_flag engine off` seperti saran audit lama: server ini
+  LiteSpeed dengan `AddHandler`.
+
+  Pembagian tugas di dalamnya penting dipahami sebelum menyederhanakannya,
+  dan penalaran saya yang pertama di sini terbalik:
+
+  - `RemoveHandler`/`RemoveType` — argumen ekstensi mod_mime **tidak peka
+    huruf**, dan ini **satu-satunya** lapis yang menjangkau nama
+    multi-ekstensi seperti `foto.php.jpg`. `FilesMatch` tidak melihatnya
+    karena hanya mencocokkan ekstensi terakhir.
+  - `FilesMatch` — **peka huruf secara bawaan**, jadi `(?i)` wajib. Tanpa itu
+    `probe.PHP` dan `dump.SQL` lolos.
+  - `RemoveOutputFilter` + `Options -Includes -IncludesNOEXEC` — SSI tidak
+    tersentuh `RemoveHandler`, dan `-ExecCGI` bukan `-Includes`.
+
+  Terverifikasi di produksi 14 September 2026, dengan User-Agent peramban:
+
+      probe.PHP       403                              ← (?i) bekerja
+      probe.php.jpg   200, isi kode sumber mentah      ← RemoveHandler bekerja
+      probe.SHTML     403                              ← SSI tertutup
+      uji.SQL         403                              ← (?i) di akar bekerja
+
+  Baris kedua itu bukti bahwa `.htaccess` ini menanggung beban, bukan sekadar
+  pelengkap: berkas multi-ekstensi tetap tersaji dengan status 200, dan yang
+  mencegahnya dieksekusi hanya `RemoveHandler`.
+
   Isinya diarsipkan di repo, tapi `.cpanel.yml` tidak menyalin `uploads/` —
-  salinan server diurus manual.
+  salinan server diurus manual. Blok `(?i)` untuk log/dump di `.htaccess` akar
+  kedua situs juga hanya ada di server.
 - ~~`api/auth_middleware.php` rekursif~~ — bukan cacat yang perlu diperbaiki,
   melainkan kode mati. Ketujuh pemanggilnya ada di `guru_area/` dan
   `classync/api/`, keduanya sudah digantikan endpoint repo API dengan nama
@@ -200,6 +264,42 @@ memerlukan deploy kode sama sekali.
   diizinkan meski sensus 1.896 foto produksi hanya menemukan 1.203 `.jpeg`,
   687 `.jpg`, 6 `.png`, dan nol HEIC. Terverifikasi di produksi lewat pola
   nama berkas yang baru.
+- ~~Penghapusan berkas arbitrer di `update_profil_guru.php`~~ — commit
+  `188c705`, repo API. `$_POST['foto_lama']` dipakai mentah di dua tempat, dan
+  endpointnya tanpa autentikasi: digabung ke path absolut lalu `unlink()`, dan
+  disimpan ke kolom `foto_profil` kalau tidak ada foto baru. Basisnya berakhir
+  `/` sehingga `..` menjadi komponen path utuh dan traversal bekerja —
+  `foto_lama=../../../config/db-classync.php` menghapus konfigurasi basis data
+  dan mematikan seluruh sistem. Diperbaiki dengan membaca foto lama dari basis
+  data, ditambah pagar `realpath()` sebelum `unlink()`.
+- ~~Regresi GIF~~ — commit `e81f6f9`, repo API. Daftar putih di `6c77656`
+  hanya memetakan JPEG/PNG/WEBP, sementara `absen_bk.tsx:239` menerima GIF.
+  Guru BK yang memilih GIF dari galeri ditolak server. Sensus foto produksi
+  tidak menemukan GIF, jadi saya menyimpulkan formatnya tidak terpakai — yang
+  tidak saya periksa adalah format apa yang **diterima** layar aplikasi. Dua
+  hal berbeda, dan yang kedua itulah kontraknya.
+- ~~Path foto tidak di-escape di tujuh sink~~ — commit `b2985c2`. Audit
+  menunjuk `admin/laporan.php:247`; sapuan seluruh repo menemukan enam lagi di
+  `admin/laporan_absensi_siswa.php`, `laporan_absensi_siswa.php`, dan
+  `absensi_pkl.php`. Klaim sebelumnya bahwa "panel admin memakai
+  `htmlspecialchars()` pada semua path foto" keliru: hanya `<img src=` yang
+  diperiksa, `href` tidak.
+
+  Dua sink di `absensi_pkl.php` menaruh nilai yang sama ke **dua konteks** —
+  atribut `src` dan string JavaScript di dalam `onclick`. Perbaikan pertama
+  memakai `json_encode` dengan `JSON_HEX_QUOT` dan **mematikan modal foto PKL
+  di produksi**, karena flag itu hanya mengubah kutip di dalam isi string,
+  bukan kutip pembatas JSON-nya. Diperbaiki commit `b92a527` dengan
+  `htmlspecialchars(json_encode($v), ENT_QUOTES, 'UTF-8')`, diuji lebih dulu
+  dengan masukan bermusuhan.
+- ~~`guru_id` mentah di nama berkas~~ — commit `caa1fcf`, repo API. Di-cast
+  `(int)` di titik masuk pada keempat endpoint unggah. Klaim bahwa berkas
+  polyglot "tidak akan pernah bisa dieksekusi bahkan seandainya `.htaccess`
+  hilang" **salah**: `guru_id=1.php.` menghasilkan `absen-1.php.-TIME.jpg`, dan
+  mod_mime memproses setiap komponen ekstensi, bukan hanya yang terakhir.
+  Sekalian `rand(100, 999)` diganti `bin2hex(random_bytes(4))` — peluang
+  tabrakan 1/900 bagi guru yang sama pada detik yang sama, dan berkas kedua
+  akan menimpa yang pertama.
 
 ## Yang sudah tidak dipakai atau sudah rusak
 
@@ -226,3 +326,9 @@ memerlukan deploy kode sama sekali.
 - Jangan menambahkan kembali `ini_set('display_errors', 1)` ke berkas apa pun.
 - Jangan menyeragamkan bentuk pesan galat antar-endpoint; aplikasi versi lama
   membaca bentuk tertentu.
+- Jangan memasukkan nilai ke atribut event handler (`onclick` dan sejenisnya)
+  hanya dengan `htmlspecialchars()`. Peramban mengurai entitas HTML lebih dulu,
+  jadi `&#039;` kembali jadi `'` sebelum JavaScript membacanya. Pakai
+  `htmlspecialchars(json_encode($v), ENT_QUOTES, 'UTF-8')` — dua lapis,
+  masing-masing untuk konteksnya. Dan uji dengan **mengklik**: kegagalan di
+  sini senyap, halaman tetap tampil normal dan tidak ada galat apa pun.
