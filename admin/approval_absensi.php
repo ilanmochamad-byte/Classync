@@ -38,17 +38,31 @@ function getHariIndonesia($date) {
 $msg = "";
 
 if (isset($_POST['action'])) {
-    $id = $_POST['id'];
+    $id = (int)($_POST['id'] ?? 0);
     $status = $_POST['action']; // 'Disetujui' atau 'Ditolak'
-    
-    // 1. Ambil data pengajuan mentah
-    $stmt_req = $conn->prepare("SELECT * FROM pengajuan_absensi WHERE id = ?");
+
+    // Transaksi + FOR UPDATE. Permintaan kedua menunggu di sini sampai yang
+    // pertama selesai, lalu melihat status sudah bukan 'Pending'. Tanpa ini,
+    // klik ganda pada tombol Disetujui memasukkan DUA baris absensi — dan
+    // hitungHonorBulan() di keuangan_helper.php menjumlahkan honor PER BARIS,
+    // jadi honornya benar-benar terbayar dobel. Sudah pernah terjadi sekali.
+    // pengajuan_absensi dan absensi keduanya InnoDB, jadi kuncian ini berlaku.
+    $conn->begin_transaction();
+    $transaksi_sukses = false;
+
+    // 1. Ambil data pengajuan mentah, sekaligus kunci barisnya
+    $stmt_req = $conn->prepare("SELECT * FROM pengajuan_absensi WHERE id = ? FOR UPDATE");
     $stmt_req->bind_param("i", $id);
     $stmt_req->execute();
     $req = $stmt_req->get_result()->fetch_assoc();
     $stmt_req->close();
-    
-    if (!$req) die("Data tidak ditemukan.");
+
+    if (!$req) { $conn->rollback(); die("Data tidak ditemukan."); }
+
+    $sudah_diproses = ($req['status'] !== 'Pending');
+    if ($sudah_diproses) {
+        $msg = "Pengajuan ini sudah diproses sebelumnya (status: " . $req['status'] . ").";
+    }
 
     // Variabel untuk Push Notification
     $notif_title = "";
@@ -56,7 +70,7 @@ if (isset($_POST['action'])) {
     $send_notif = false;
     $guru_id = $req['guru_id'];
 
-    if ($status === 'Disetujui') {
+    if (!$sudah_diproses && $status === 'Disetujui') {
         // --- LOGIKA UTAMA AGAR HONOR CAIR ---
         $tanggal = $req['tanggal'];
         $hari_ini = getHariIndonesia($tanggal);
@@ -112,24 +126,35 @@ if (isset($_POST['action'])) {
         }
 
         if ($berhasil_insert) {
-            $conn->query("UPDATE pengajuan_absensi SET status = 'Disetujui' WHERE id = $id");
-            $msg = "Pengajuan disetujui. Honor telah diperbarui.";
-            
+            // Syarat status='Pending' adalah pengaman kedua setelah FOR UPDATE.
+            // Baris ini sebelumnya menyisipkan $id langsung ke dalam SQL, jadi
+            // id=1 OR 1=1 akan menyetujui SELURUH pengajuan Pending sekaligus.
+            $stmt_setuju = $conn->prepare("UPDATE pengajuan_absensi SET status = 'Disetujui' WHERE id = ? AND status = 'Pending'");
+            $stmt_setuju->bind_param("i", $id);
+            $stmt_setuju->execute();
+            $transaksi_sukses = ($stmt_setuju->affected_rows === 1);
+            $stmt_setuju->close();
+
+            $msg = $transaksi_sukses
+                 ? "Pengajuan disetujui. Honor telah diperbarui."
+                 : "Pengajuan ini sudah diproses sebelumnya.";
+
             // Siapkan data untuk notifikasi
             $notif_title = "✅ Pengajuan Disetujui!";
             $notif_body = "Pengajuan absensi " . $req['jenis_absensi'] . " tanggal " . date('d M Y', strtotime($req['tanggal'])) . " telah disetujui.";
-            $send_notif = true;
+            $send_notif = $transaksi_sukses;
         } elseif ($msg == "") {
             $msg = "Terjadi kesalahan sistem saat menyimpan data absensi.";
         }
 
-    } else {
+    } elseif (!$sudah_diproses) {
         // Jika Ditolak
         $komentar = $_POST['komentar_admin'] ?? '';
-        $stmt_reject = $conn->prepare("UPDATE pengajuan_absensi SET status = 'Ditolak', komentar_admin = ? WHERE id = ?");
+        $stmt_reject = $conn->prepare("UPDATE pengajuan_absensi SET status = 'Ditolak', komentar_admin = ? WHERE id = ? AND status = 'Pending'");
         $stmt_reject->bind_param("si", $komentar, $id);
-    
-        if($stmt_reject->execute()) {
+
+        if($stmt_reject->execute() && $stmt_reject->affected_rows === 1) {
+            $transaksi_sukses = true;
             $msg = "Pengajuan ditolak dengan alasan.";
 
             // Siapkan data untuk notifikasi
@@ -141,11 +166,18 @@ if (isset($_POST['action'])) {
         $stmt_reject->close();
     }
 
+    // Selesaikan transaksi SEBELUM menyentuh jaringan. Panggilan FCM bisa
+    // menggantung beberapa detik, dan kunci baris tidak boleh ditahan selama itu.
+    if ($transaksi_sukses) { $conn->commit(); } else { $conn->rollback(); }
+
     // --- PROSES PENGIRIMAN PUSH NOTIFICATION KE SERVER API ---
     if ($send_notif) {
         try {
             // Ambil token push guru
-            $res_token = $conn->query("SELECT push_token FROM guru WHERE id = " . $guru_id);
+            $stmt_token = $conn->prepare("SELECT push_token FROM guru WHERE id = ?");
+            $stmt_token->bind_param("i", $guru_id);
+            $stmt_token->execute();
+            $res_token = $stmt_token->get_result();
             if ($res_token && $res_token->num_rows > 0) {
                 $token = $res_token->fetch_assoc()['push_token'];
                 
