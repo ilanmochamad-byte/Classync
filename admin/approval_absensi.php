@@ -96,12 +96,27 @@ if (isset($_POST['action'])) {
                 $jadwal_id = $jadwal['id'];
                 $waktu_absensi = $tanggal . ' ' . $jam_mulai_aju;
                 $ket = "Susulan: " . $req['keterangan'];
-                
-                $stmt_ins = $conn->prepare("INSERT INTO absensi (guru_id, jadwal_id, tipe_absensi, waktu_absensi, status, keterangan) VALUES (?, ?, 'mengajar', ?, 'Hadir', ?)");
-                $stmt_ins->bind_param("iiss", $guru_id, $jadwal_id, $waktu_absensi, $ket);
-                
-                if($stmt_ins->execute()) $berhasil_insert = true;
-                $stmt_ins->close();
+
+                // Satu jadwal mengajar hanya boleh satu baris per tanggal. Guru
+                // boleh punya beberapa jadwal di hari yang sama — jadwal_id yang
+                // membedakannya. Tanpa penjaga ini, dua pengajuan berbeda untuk
+                // slot yang sama menghasilkan dua baris, dan hitungHonorBulan()
+                // membayar keduanya.
+                $stmt_cek = $conn->prepare("SELECT id FROM absensi WHERE guru_id = ? AND jadwal_id = ? AND tipe_absensi = 'mengajar' AND DATE(waktu_absensi) = ?");
+                $stmt_cek->bind_param("iis", $guru_id, $jadwal_id, $tanggal);
+                $stmt_cek->execute();
+                $is_duplicate = $stmt_cek->get_result()->num_rows > 0;
+                $stmt_cek->close();
+
+                if ($is_duplicate) {
+                    $msg = "Pengajuan gagal disetujui: Absensi mengajar untuk jadwal dan tanggal tersebut sudah ada.";
+                } else {
+                    $stmt_ins = $conn->prepare("INSERT INTO absensi (guru_id, jadwal_id, tipe_absensi, waktu_absensi, status, keterangan) VALUES (?, ?, 'mengajar', ?, 'Hadir', ?)");
+                    $stmt_ins->bind_param("iiss", $guru_id, $jadwal_id, $waktu_absensi, $ket);
+
+                    if($stmt_ins->execute()) $berhasil_insert = true;
+                    $stmt_ins->close();
+                }
             } else {
                 $msg = "Gagal: Tidak ditemukan jadwal mengajar pada hari/jam tersebut.";
             }
@@ -111,18 +126,58 @@ if (isset($_POST['action'])) {
             $waktu_absensi = $tanggal . ' ' . $jam_mulai_aju;
             $ket = "Susulan: " . $req['keterangan'];
 
-            $stmt_ins = $conn->prepare("INSERT INTO absensi (guru_id, jadwal_id, tipe_absensi, waktu_absensi, status, keterangan) VALUES (?, 0, ?, ?, 'Hadir', ?)");
-            $stmt_ins->bind_param("isss", $guru_id, $tipe_db, $waktu_absensi, $ket);
-            
-            if($stmt_ins->execute()) {
-                $berhasil_insert = true;
-                if ($tipe_db == 'piket') {
-                    $stmt_daily = $conn->prepare("INSERT INTO absensi_harian (guru_id, tanggal, jam_masuk, jam_pulang) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE jam_masuk = VALUES(jam_masuk)");
-                    $stmt_daily->bind_param("isss", $guru_id, $tanggal, $req['jam_mulai'], $req['jam_selesai']);
-                    $stmt_daily->execute();
-                }
+            // Cari jadwal sungguhan, seperti proses_approval_absensi.php di repo
+            // API. Sebelumnya berkas ini menyimpan jadwal_id = 0, sehingga kedua
+            // jalur approval tidak bisa saling melihat baris yang sudah ada.
+            $jadwal_id = 0;
+            if ($tipe_db == 'piket') {
+                $stmt_jadwal = $conn->prepare("SELECT id FROM jadwal_piket WHERE guru_id = ? AND hari = ? AND status_jadwal = 'Aktif' LIMIT 1");
+                $stmt_jadwal->bind_param("is", $guru_id, $hari_ini);
+            } else {
+                $stmt_jadwal = $conn->prepare("SELECT id FROM jadwal_ekskul WHERE guru_id = ? AND hari = ? AND (? BETWEEN jam_mulai AND jam_selesai) AND status_jadwal = 'Aktif' LIMIT 1");
+                $stmt_jadwal->bind_param("iss", $guru_id, $hari_ini, $jam_mulai_aju);
             }
-            $stmt_ins->close();
+            $stmt_jadwal->execute();
+            $jadwal = $stmt_jadwal->get_result()->fetch_assoc();
+            $stmt_jadwal->close();
+            if ($jadwal) $jadwal_id = $jadwal['id'];
+
+            if ($jadwal_id > 0) {
+                // Kuncinya berbeda per jenis, dan perbedaan itu disengaja:
+                //   piket  — satu hari satu bayar. Label sesi Pagi/Siang tidak
+                //            menentukan waktu, jadi jadwal_id TIDAK dipakai.
+                //   ekskul — satu guru boleh membina dua ekskul berbeda di hari
+                //            yang sama dan dibayar dua kali, jadi jadwal_id wajib.
+                if ($tipe_db == 'piket') {
+                    $stmt_cek = $conn->prepare("SELECT id FROM absensi WHERE guru_id = ? AND tipe_absensi = 'piket' AND DATE(waktu_absensi) = ?");
+                    $stmt_cek->bind_param("is", $guru_id, $tanggal);
+                } else {
+                    $stmt_cek = $conn->prepare("SELECT id FROM absensi WHERE guru_id = ? AND jadwal_id = ? AND tipe_absensi = 'ekskul' AND DATE(waktu_absensi) = ?");
+                    $stmt_cek->bind_param("iis", $guru_id, $jadwal_id, $tanggal);
+                }
+                $stmt_cek->execute();
+                $is_duplicate = $stmt_cek->get_result()->num_rows > 0;
+                $stmt_cek->close();
+
+                if ($is_duplicate) {
+                    $msg = "Pengajuan gagal disetujui: Absensi " . $req['jenis_absensi'] . " untuk tanggal tersebut sudah ada.";
+                } else {
+                    $stmt_ins = $conn->prepare("INSERT INTO absensi (guru_id, jadwal_id, tipe_absensi, waktu_absensi, status, keterangan) VALUES (?, ?, ?, ?, 'Hadir', ?)");
+                    $stmt_ins->bind_param("iisss", $guru_id, $jadwal_id, $tipe_db, $waktu_absensi, $ket);
+
+                    if($stmt_ins->execute()) {
+                        $berhasil_insert = true;
+                        if ($tipe_db == 'piket') {
+                            $stmt_daily = $conn->prepare("INSERT INTO absensi_harian (guru_id, tanggal, jam_masuk, jam_pulang) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE jam_masuk = VALUES(jam_masuk)");
+                            $stmt_daily->bind_param("isss", $guru_id, $tanggal, $req['jam_mulai'], $req['jam_selesai']);
+                            $stmt_daily->execute();
+                        }
+                    }
+                    $stmt_ins->close();
+                }
+            } else {
+                $msg = "Gagal: Tidak ditemukan jadwal " . $req['jenis_absensi'] . " Aktif pada hari/jam tersebut.";
+            }
         }
 
         if ($berhasil_insert) {
