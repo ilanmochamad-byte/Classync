@@ -130,17 +130,27 @@ if (isset($_POST['action'])) {
             // API. Sebelumnya berkas ini menyimpan jadwal_id = 0, sehingga kedua
             // jalur approval tidak bisa saling melihat baris yang sudah ada.
             $jadwal_id = 0;
+            $nama_ekskul = '';
             if ($tipe_db == 'piket') {
                 $stmt_jadwal = $conn->prepare("SELECT id FROM jadwal_piket WHERE guru_id = ? AND hari = ? AND status_jadwal = 'Aktif' LIMIT 1");
                 $stmt_jadwal->bind_param("is", $guru_id, $hari_ini);
             } else {
-                $stmt_jadwal = $conn->prepare("SELECT id FROM jadwal_ekskul WHERE guru_id = ? AND hari = ? AND (? BETWEEN jam_mulai AND jam_selesai) AND status_jadwal = 'Aktif' LIMIT 1");
-                $stmt_jadwal->bind_param("iss", $guru_id, $hari_ini, $jam_mulai_aju);
+                // Satu guru bisa membina dua ekskul di hari yang sama, dan jadwal
+                // keduanya bisa bertumpang tindih. BETWEEN saja akan cocok ke lebih
+                // dari satu baris, lalu LIMIT 1 tanpa ORDER BY memilih salah satunya
+                // secara kebetulan — dua pengajuan berbeda bisa jatuh ke jadwal_id
+                // yang sama, dan yang kedua ditolak keliru sebagai duplikat.
+                // Utamakan jadwal yang jam mulainya sama persis dengan pengajuan.
+                $stmt_jadwal = $conn->prepare("SELECT id, nama_ekskul FROM jadwal_ekskul WHERE guru_id = ? AND hari = ? AND (? BETWEEN jam_mulai AND jam_selesai) AND status_jadwal = 'Aktif' ORDER BY (jam_mulai = ?) DESC, id ASC LIMIT 1");
+                $stmt_jadwal->bind_param("isss", $guru_id, $hari_ini, $jam_mulai_aju, $jam_mulai_aju);
             }
             $stmt_jadwal->execute();
             $jadwal = $stmt_jadwal->get_result()->fetch_assoc();
             $stmt_jadwal->close();
-            if ($jadwal) $jadwal_id = $jadwal['id'];
+            if ($jadwal) {
+                $jadwal_id = $jadwal['id'];
+                $nama_ekskul = $jadwal['nama_ekskul'] ?? '';
+            }
 
             if ($jadwal_id > 0) {
                 // Kuncinya berbeda per jenis, dan perbedaan itu disengaja:
@@ -160,7 +170,9 @@ if (isset($_POST['action'])) {
                 $stmt_cek->close();
 
                 if ($is_duplicate) {
-                    $msg = "Pengajuan gagal disetujui: Absensi " . $req['jenis_absensi'] . " untuk tanggal tersebut sudah ada.";
+                    $msg = "Pengajuan gagal disetujui: Absensi " . $req['jenis_absensi']
+                         . ($nama_ekskul !== '' ? " (" . $nama_ekskul . ")" : "")
+                         . " untuk tanggal tersebut sudah ada.";
                 } else {
                     $stmt_ins = $conn->prepare("INSERT INTO absensi (guru_id, jadwal_id, tipe_absensi, waktu_absensi, status, keterangan) VALUES (?, ?, ?, ?, 'Hadir', ?)");
                     $stmt_ins->bind_param("iisss", $guru_id, $jadwal_id, $tipe_db, $waktu_absensi, $ket);
