@@ -85,6 +85,7 @@ if (isset($_POST['action'])) {
                 WHERE guru_id = ? 
                 AND hari = ? 
                 AND (? BETWEEN jam_mulai AND jam_selesai)
+                AND status_jadwal = 'Aktif'
                 LIMIT 1
             ");
             $stmt_jadwal->bind_param("iss", $guru_id, $hari_ini, $jam_mulai_aju);
