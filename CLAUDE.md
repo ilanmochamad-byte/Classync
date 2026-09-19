@@ -169,19 +169,31 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   yang dikirim milik guru tersebut. Ini proyek migrasi token empat fase yang
   dikunci di `CLAUDE.md` repo API; jangan menegakkan autentikasi tanpa
   melewati keempat fasenya, karena aplikasi versi lama akan mati.
-- **Tinggi** — kunci rahasia FCM `'SMKTAH_Classync_2026_Secure!'` tertulis apa
-  adanya di tiga berkas: `admin/approval_absensi.php:10` di repo ini, serta
-  `proses_approval_absensi.php:26` dan `send_fcm_api.php:11` di repo API. Kedua
-  repositori publik dan riwayat Git permanen, jadi memindahkannya saja tidak
-  cukup — kuncinya harus ikut diganti. Siapa pun yang memegangnya bisa
-  mengirim notifikasi ke ponsel guru mana pun atas nama sekolah.
+- **Tinggi** — kunci rahasia FCM pernah tertulis apa adanya di tiga berkas di
+  dua repositori publik. Kuncinya kini dibaca dari
+  `/DATA/k1807225/config/fcm-classync.php`, tapi **rotasinya belum selesai**:
+  kunci lamanya sudah telanjur masuk riwayat Git yang permanen, jadi
+  memindahkannya saja tidak cukup. Siapa pun yang memegangnya bisa mengirim
+  notifikasi ke ponsel guru mana pun atas nama sekolah.
 
-  Perbaikannya menuntut ketiga berkas berubah dalam satu gerakan. Kalau
-  pengirim dan penerima tidak sepakat, notifikasi mati **diam-diam**:
-  `send_fcm_api.php` menolak permintaannya, dan kedua pemanggil memakai
-  `@file_get_contents()` sehingga penolakan itu tidak pernah terlihat — tidak
-  di layar, tidak di log. Approval tetap berhasil dan honor tetap masuk; yang
-  hilang hanya pemberitahuan ke guru.
+  Berkas konfigurasi itu memuat dua hal, dan pemisahannya disengaja:
+  `$fcm_secret` adalah kunci yang **dikirim** kedua pemanggil, sedangkan
+  `$fcm_secrets_sah` adalah daftar kunci yang **diterima** `send_fcm_api.php`.
+  Karena penerimanya menerima daftar, sisa rotasinya tidak menuntut deploy kode
+  sama sekali — cukup menyunting satu berkas di server:
+
+      3. tambah kunci baru ke $fcm_secrets_sah  → penerima menerima dua-duanya
+      4. ganti $fcm_secret jadi kunci baru      → pengirim beralih
+      5. amati beberapa hari, cabut kunci lama  → rotasi tuntas
+
+  Urutan itu penting karena kegagalannya **senyap**: kalau pengirim dan
+  penerima tidak sepakat, `send_fcm_api.php` menolak dan approval tetap
+  berhasil — yang hilang hanya pemberitahuan ke guru. Kini penolakan itu
+  tercatat ke `error_log` di kedua pemanggil, jadi fase 3-5 bisa diawasi,
+  bukan sekadar diharapkan.
+
+  Jangan menulis kunci apa pun — lama maupun baru — ke berkas di dalam Git,
+  termasuk ke berkas ini.
 - **Tinggi** — tidak ada batas ukuran berkas unggahan. `upload_max_filesize`
   100 MB, `getimagesize()` hanya perlu membaca header, dan endpointnya tanpa
   autentikasi — seratus permintaan JPEG sah berpadding bisa memakan hampir

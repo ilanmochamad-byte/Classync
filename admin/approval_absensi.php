@@ -4,10 +4,25 @@ include 'partials/header.php';
 // Helper: Menembak API FCM yang berada di Server B (api.smkt.alhasan.co.id)
 function panggilApiFCMServerB($token, $title, $body, $screenTarget) {
     $url = 'https://api.smkt.alhasan.co.id/send_fcm_api.php';
-    
-    // Siapkan data, pastikan kunci rahasia sama dengan yang ada di send_fcm_api.php
+
+    // Kunci rahasia dibaca dari luar webroot. Kalau berkasnya tidak terbaca,
+    // notifikasi DILEWATI — approval tetap berhasil dan honor tetap masuk.
+    // Pemberitahuan ke guru tidak sepadan dengan mematikan approval, dan di
+    // situlah bedanya dengan db.php yang memang harus die().
+    $config_fcm = '/DATA/k1807225/config/fcm-classync.php';
+    if (!is_readable($config_fcm)) {
+        error_log("approval_absensi (panel web): konfigurasi FCM tidak terbaca di " . $config_fcm . ", notifikasi dilewati.");
+        return false;
+    }
+    require $config_fcm;
+
+    if (empty($fcm_secret)) {
+        error_log("approval_absensi (panel web): \$fcm_secret kosong di " . $config_fcm . ", notifikasi dilewati.");
+        return false;
+    }
+
     $data = [
-        'secret' => 'SMKTAH_Classync_2026_Secure!',
+        'secret' => $fcm_secret,
         'token' => $token,
         'title' => $title,
         'body' => $body,
@@ -18,12 +33,34 @@ function panggilApiFCMServerB($token, $title, $body, $screenTarget) {
         'http' => [
             'header'  => "Content-type: application/json\r\n",
             'method'  => 'POST',
-            'content' => json_encode($data)
+            'content' => json_encode($data),
+            // Tanpa batas waktu, penerima yang menggantung menahan permintaan
+            // ini sampai batas PHP. Transaksinya sudah di-commit lebih dulu,
+            // tapi adminnya tetap menunggu layar kosong.
+            'timeout' => 10,
+            // Supaya badan respons 403 dan 500 tetap terbaca, bukan jadi false.
+            // Tanpa ini pesan "Kunci Rahasia Salah" hilang dan log jadi bisu.
+            'ignore_errors' => true
         ]
     ];
-    $context  = stream_context_create($options);
+    $context = stream_context_create($options);
     $result = @file_get_contents($url, false, $context);
-    return $result;
+
+    // Hentikan kegagalan senyap. Sebelumnya @ menelan segalanya dan hasilnya
+    // tidak pernah diperiksa, sehingga kunci yang tidak cocok tampak persis
+    // sama dengan notifikasi yang berhasil terkirim.
+    if ($result === false) {
+        error_log("approval_absensi (panel web): panggilan FCM gagal, tidak ada respons dari send_fcm_api.php.");
+        return false;
+    }
+
+    $respons = json_decode($result, true);
+    if (!is_array($respons) || ($respons['status'] ?? '') !== 'success') {
+        error_log("approval_absensi (panel web): FCM menolak — " . substr($result, 0, 300));
+        return false;
+    }
+
+    return true;
 }
 
 // Helper: Konversi Nama Hari (Inggris -> Indonesia)
