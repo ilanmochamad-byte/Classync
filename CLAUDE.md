@@ -22,6 +22,38 @@ sekadar bug — ia jadi gaji yang salah. Empat aturan yang mengikat:
    Aplikasi juga terikat pada nilai string tertentu — `monitoring_siswa.tsx`
    membandingkan `status_masuk` persis dengan `'Tepat Waktu'` dan `'Terlambat'`.
 
+## Aturan honor per jenis absensi
+
+`hitungHonorBulan()` di `admin/keuangan_helper.php` menjumlahkan honor **per
+baris `absensi`**. Satu baris berlebih berarti satu kali bayar berlebih, dan
+tidak ada gejala apa pun sampai slip gaji keluar. Karena itu setiap jalur yang
+menulis ke `absensi` butuh penjaga duplikat — dan kuncinya **berbeda per
+jenis**:
+
+| Jenis | Kunci duplikat | Alasan |
+|---|---|---|
+| mengajar | `guru_id` + `jadwal_id` + tanggal | jadwalnya punya hari, jam mulai, dan jam selesai yang pasti; guru tidak mungkin mengajar dua kelas sekaligus |
+| ekskul | `guru_id` + `jadwal_id` + tanggal | satu guru boleh membina dua ekskul di hari yang sama dan dibayar dua kali |
+| piket | `guru_id` + tanggal, **tanpa `jadwal_id`** | satu hari satu bayar; label sesi Pagi/Siang tidak menentukan waktu |
+| bimbingan (BK) | `guru_id` + tanggal + `topik_tema` + `sasaran_layanan` | tidak punya jadwal sama sekali; guru BK melayani 2 sampai 5 kali sehari |
+
+Dua aturan tambahan yang tidak terbaca dari kode:
+
+- **Honor hanya untuk guru yang terjadwal.** Pencarian jadwal harus menuntut
+  `status_jadwal = 'Aktif'` untuk ketiga jenis yang punya jadwal, di panel web
+  maupun aplikasi. Konsekuensinya disengaja: pengajuan untuk jadwal yang kini
+  non-Aktif ditolak, termasuk untuk tanggal ketika jadwal itu masih berjalan.
+- **Jadwal ekskul bisa bertumpang tindih.** `BETWEEN jam_mulai AND jam_selesai`
+  bisa cocok ke lebih dari satu baris, lalu `LIMIT 1` tanpa `ORDER BY` memilih
+  salah satunya secara kebetulan — dua pengajuan berbeda jatuh ke `jadwal_id`
+  yang sama dan yang kedua ditolak keliru sebagai duplikat. Pakai
+  `ORDER BY (jam_mulai = ?) DESC, id ASC`. Tidak berlaku untuk mengajar: guru
+  tidak bisa berada di dua kelas sekaligus.
+
+Semua aturan ini datang dari koreksi manusia, bukan dari kode. Saya menebak
+tiga di antaranya dan ketiganya salah. Jangan menyimpulkannya ulang dari isi
+tabel — riwayat `absensi` memuat baris dari aturan lama dan dari pengujian.
+
 ## Cara perubahan sampai ke produksi
 
 ```
@@ -137,14 +169,19 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   yang dikirim milik guru tersebut. Ini proyek migrasi token empat fase yang
   dikunci di `CLAUDE.md` repo API; jangan menegakkan autentikasi tanpa
   melewati keempat fasenya, karena aplikasi versi lama akan mati.
-- **Tinggi** — `admin/approval_absensi.php` tidak idempoten. Halaman itu tidak
-  memastikan status masih `Pending` dan tidak memeriksa duplikat, sehingga
-  admin yang menekan "Disetujui" dua kali — atau peramban yang mengulang POST
-  yang sama — memasukkan baris `absensi` baru setiap kali. Honor mengajar,
-  piket, dan ekskul dihitung per baris, jadi hasilnya honor ganda. Perbaikannya
-  menuntut transaksi, `SELECT ... FOR UPDATE`, perubahan status bersyarat, dan
-  batasan unik di basis data. Ini temuan yang paling sulit terlihat: tidak ada
-  gejala sampai slip gaji keluar.
+- **Tinggi** — kunci rahasia FCM `'SMKTAH_Classync_2026_Secure!'` tertulis apa
+  adanya di tiga berkas: `admin/approval_absensi.php:10` di repo ini, serta
+  `proses_approval_absensi.php:26` dan `send_fcm_api.php:11` di repo API. Kedua
+  repositori publik dan riwayat Git permanen, jadi memindahkannya saja tidak
+  cukup — kuncinya harus ikut diganti. Siapa pun yang memegangnya bisa
+  mengirim notifikasi ke ponsel guru mana pun atas nama sekolah.
+
+  Perbaikannya menuntut ketiga berkas berubah dalam satu gerakan. Kalau
+  pengirim dan penerima tidak sepakat, notifikasi mati **diam-diam**:
+  `send_fcm_api.php` menolak permintaannya, dan kedua pemanggil memakai
+  `@file_get_contents()` sehingga penolakan itu tidak pernah terlihat — tidak
+  di layar, tidak di log. Approval tetap berhasil dan honor tetap masuk; yang
+  hilang hanya pemberitahuan ke guru.
 - **Tinggi** — tidak ada batas ukuran berkas unggahan. `upload_max_filesize`
   100 MB, `getimagesize()` hanya perlu membaca header, dan endpointnya tanpa
   autentikasi — seratus permintaan JPEG sah berpadding bisa memakan hampir
@@ -171,11 +208,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   `utils/tanggal.ts` — tapi belum sampai ke guru: tidak ada OTA, jadi butuh
   build EAS dan tinjauan toko. Sampai rilis mendarat, versi lama tetap
   mengirim tanggal mundur dan basis data menerima campuran keduanya.
-- **Sedang** — `proses_absen_bk.php` mencatat absensi walau unggah foto gagal.
-  Blok `if ($_FILES['foto_bukti']['error'] == 0)` tidak punya `else`, jadi
-  galat seperti `UPLOAD_ERR_INI_SIZE` dilewati diam-diam dan barisnya tersimpan
-  dengan `foto_bukti` kosong. Dua endpoint absen lain melempar Exception dalam
-  keadaan yang sama. Perlu putusan lebih dulu: apakah foto memang wajib.
 - **Rendah** — blok `catch` di keempat endpoint unggah repo API mengirim
   `$e->getMessage()` mentah ke aplikasi. Pesannya biasanya pesan aplikasi yang
   berguna bagi guru ("Foto bukti wajib diupload"), tapi eksepsi basis data
@@ -189,6 +221,48 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~`admin/approval_absensi.php` tidak idempoten~~ — ditutup lewat lima commit
+  di dua repo: `d143f39`, `99ab1b9`, `db58ada` di panel web, lalu `9cca477` di
+  repo API dan `eca427d` untuk `status_jadwal`. Kedua jalur approval kini
+  memakai transaksi, `SELECT ... FOR UPDATE`, `UPDATE ... AND status =
+  'Pending'` dengan `affected_rows` sebagai penentu, dan penjaga duplikat yang
+  kuncinya berbeda per jenis. `commit()` dipasang **sebelum** panggilan FCM
+  supaya jaringan yang lambat tidak menahan kunci baris.
+
+  Yang memakan waktu bukan transaksinya, melainkan menemukan kunci yang benar
+  untuk tiap jenis — hasilnya ada di "Aturan honor per jenis absensi" di atas.
+  Cakupan saya yang pertama terlalu sempit: saya menjaga "satu pengajuan, satu
+  approval", padahal yang dibutuhkan "satu slot, satu baris absensi".
+  Pengujian menghasilkan empat baris ganda dalam sepuluh menit.
+
+  Batasan unik di basis data **belum** dipasang, masih terhalang satu baris
+  ganda Juli (guru 4, jadwal 381, 7 Juli 2026). Itu data honor bulan yang sudah
+  terbayar; keputusannya di tangan bendahara, bukan keputusan teknis.
+
+  Terverifikasi di produksi 19 September 2026 lewat delapan uji, panel web dan
+  aplikasi. Yang paling meyakinkan uji ekskul: dua jadwal bertumpang tindih
+  keduanya berhasil, lalu pengajuan ketiga untuk slot yang sama ditolak dengan
+  pesan yang menyebut nama ekskulnya.
+- ~~`proses_absen_bk.php` mencatat absensi walau unggah foto gagal~~ — commit
+  `98bdfdb`, repo API. Foto kini wajib, menyusul dua endpoint absen lain yang
+  sudah begitu sejak awal. Galat unggah dibedakan dari "tidak ada foto":
+  `UPLOAD_ERR_INI_SIZE` berbunyi "ukuran berkasnya terlalu besar", bukan
+  "wajib diupload" yang membingungkan guru yang fotonya jelas terlampir. Foto
+  yang telanjur pindah ke `uploads/` ikut dihapus kalau `INSERT` gagal —
+  `rollback()` tidak menyentuh berkas.
+- ~~`proses_absen_bk.php` tanpa penjaga duplikat~~ — commit `a6cd9d5`, repo API.
+  Kuncinya `(guru_id, 'bimbingan', CURDATE(), topik_tema, sasaran_layanan)`.
+  Bukan per tanggal saja: guru BK memang melayani 2 sampai 5 kali sehari, jadi
+  kunci itu akan memotong honor yang sah. Bukan per topik saja: topik yang sama
+  wajar dibawakan ke dua kelas berbeda. Kombinasi topik dan sasaran terbukti
+  tidak pernah berulang satu kali pun dalam seluruh riwayat produksi.
+
+  Ini pemeriksaan biasa, bukan kuncian baris, dan batasnya sengaja ditulis di
+  komentar kodenya. Kuncinya melintasi `absensi` dan `jurnal_bk` sehingga tidak
+  bisa dijadikan batasan unik, dan `FOR UPDATE` tidak dipakai karena
+  `DATE(waktu_absensi)` bukan indeks: InnoDB akan mengunci terlalu banyak baris
+  di `absensi`, tabel tersibuk, dan menahan absen guru lain. Celah sepersekian
+  detik untuk dua kiriman yang benar-benar bersamaan masih ada.
 - ~~SQL injection di `get_monitoring_absensi.php`~~ — prepared statement,
   commit `e6a567f` repo API. Endpoint itu juga tidak lagi mengirim pesan galat
   mentah ke pemanggil. Sapuan ulang seluruh repo API tidak menemukan endpoint
