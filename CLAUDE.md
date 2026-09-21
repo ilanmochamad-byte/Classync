@@ -285,11 +285,25 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
   **Tertangani** oleh `includes/pengirim_apns.php` di repo API (`196f452`,
   `181d5d4`, lalu `dd7774b` untuk pengingat harian): server memilah menurut
-  bentuk token dan mengirim token APNs langsung ke Apple. Terverifikasi di
-  produksi 21 September 2026 di iPhone — notifikasi berbunyi, dan menekannya
-  membuka riwayat pengajuan absensi, jadi `screen` di tingkat atas payload
-  memang terbaca oleh `content.data`. Jalur production berhasil pada percobaan
-  pertama; fallback ke sandbox belum pernah terpakai di produksi.
+  bentuk token dan mengirim token APNs langsung ke Apple. **Pengantarannya**
+  terverifikasi di produksi 21 September 2026 di iPhone: notifikasi berbunyi,
+  jalur production berhasil pada percobaan pertama, dan fallback ke sandbox
+  belum pernah terpakai.
+
+  **Tautan-dalamnya belum terbukti.** Catatan sebelumnya di sini menyatakan
+  sudah, dan itu keliru: uji pertama dilakukan saat aplikasi kebetulan sudah
+  terbuka di halaman tujuannya sendiri. Dari halaman lain, menekan notifikasi
+  tidak berpindah. Penyebabnya, untuk notifikasi jarak jauh `expo-notifications`
+  mengisi `content.data` **hanya dari kunci `body`** (`NotificationRecords.swift`,
+  `serializedNotificationData()`), sedangkan payload menaruh `screen` di tingkat
+  atas. Diperbaiki commit `2a4d1a5` — belum diuji. Ujilah dari halaman **lain**.
+
+  Peluncuran dari keadaan mati (aplikasi dihapus dari latar) tetap tidak
+  berpindah halaman walau payload-nya benar: `_layout.tsx` hanya memakai
+  `addNotificationResponseReceivedListener`, tanpa
+  `getLastNotificationResponseAsync()`, dan `initialize()` menimpa navigasi
+  dengan `router.replace('/(tabs)/dashboard')` 50 ms setelah mulai. Perlu
+  rilis aplikasi.
 
   Yang membuatnya masih terbuka ada dua. Pertama, ini penanganan sementara:
   penyelesaian permanennya **putusan A/B** di aplikasi — (A) SDK Firebase iOS
