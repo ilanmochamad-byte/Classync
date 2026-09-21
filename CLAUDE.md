@@ -211,26 +211,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   yang dikirim milik guru tersebut. Ini proyek migrasi token empat fase yang
   dikunci di `CLAUDE.md` repo API; jangan menegakkan autentikasi tanpa
   melewati keempat fasenya, karena aplikasi versi lama akan mati.
-- **Kritis** — notifikasi ke guru pengguna iPhone mati sejak 13 Juli 2026.
-  Pada tanggal itu ClassyncApp beralih dari `getExpoPushTokenAsync()` ke
-  `getDevicePushTokenAsync()`, yang di iOS mengembalikan token APNs — dan
-  token APNs tidak akan pernah diterima FCM v1. Sepuluh dari 21 guru dalam
-  keadaan itu, ditambah 2 bertoken Expo dan 1 kosong: **13 tidak bisa
-  dihubungi.** Dua bulan tanpa gejala, karena respons FCM tidak pernah
-  diperiksa; baru terlihat setelah commit `4958e4d` mencatatnya ke log.
-
-  **Ditangani sementara** oleh `includes/pengirim_apns.php` di repo API
-  (commit `196f452`, `181d5d4`): `send_fcm_api.php` memilah menurut bentuk
-  token dan mengirim token APNs langsung ke Apple. Itu bekerja dengan token
-  yang **sudah ada** di basis data, jadi tidak menuntut rilis aplikasi.
-  Tetapi jalur itu belum pernah terbukti mengantar sampai ke ponsel —
-  pengujian terhalang token basi pada perangkat uji.
-
-  Penyelesaian sebenarnya ada di aplikasi, dan belum diputuskan: memakai
-  SDK Firebase iOS supaya tokennya FCM sejati, atau kembali ke Expo Push
-  yang menangani kedua platform. Begitu satu bentuk token dipakai,
-  `includes/pengirim_apns.php` **tinggal dicabut seluruhnya** — ia memang
-  ditulis untuk dibuang.
 - **Tinggi** — ClassyncApp tidak pernah mendaftarkan ulang push token.
   `registerForPushNotificationsAsync()` punya **dua** jalan pintas
   `expo-secure-store`, dan keduanya keluar sebelum server dihubungi.
@@ -296,6 +276,28 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   Angka 100 MB di butir ini sempat saya ragukan setelah membaca `php -i` di
   terminal, yang menampilkan 2M. Saya yang keliru: itu setelan CLI. Lihat
   "Setelan PHP" di bagian atas.
+- **Sedang** — notifikasi iOS berjalan lewat penanganan sementara. Sejak
+  13 Juli 2026 ClassyncApp memakai `getDevicePushTokenAsync()`, yang di iOS
+  mengembalikan token APNs — dan token APNs tidak akan pernah diterima FCM v1.
+  Selama dua bulan sepuluh dari 21 guru tidak menerima notifikasi apa pun,
+  tanpa gejala, karena respons FCM tidak pernah diperiksa; baru terlihat
+  setelah commit `4958e4d` mencatatnya ke log. Semula berbobot Kritis.
+
+  **Tertangani** oleh `includes/pengirim_apns.php` di repo API (`196f452`,
+  `181d5d4`, lalu `dd7774b` untuk pengingat harian): server memilah menurut
+  bentuk token dan mengirim token APNs langsung ke Apple. Terverifikasi di
+  produksi 21 September 2026 di iPhone — notifikasi berbunyi, dan menekannya
+  membuka riwayat pengajuan absensi, jadi `screen` di tingkat atas payload
+  memang terbaca oleh `content.data`. Jalur production berhasil pada percobaan
+  pertama; fallback ke sandbox belum pernah terpakai di produksi.
+
+  Yang membuatnya masih terbuka ada dua. Pertama, ini penanganan sementara:
+  penyelesaian permanennya **putusan A/B** di aplikasi — (A) SDK Firebase iOS
+  supaya tokennya FCM sejati, atau (B) kembali ke Expo Push yang menangani
+  kedua platform. Tidak mendesak; setelah salah satunya rilis,
+  `includes/pengirim_apns.php` **tinggal dicabut seluruhnya** — ia memang
+  ditulis untuk dibuang. Kedua, tiga guru (dua bertoken Expo, satu kosong)
+  baru bisa dihubungi setelah 2.9.2 membuat mereka mendaftar ulang.
 - **Sedang** — lima jalur unggah di repo ini menerima berkas tanpa memeriksa
   isinya: `admin/siswa.php:63`, `admin/proses_edit_profil.php:33`,
   `admin/absensi_manual.php:46` dan `:84`, serta
