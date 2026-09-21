@@ -219,31 +219,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   sumber**, commit `aa255aa` versi 2.9.2, menunggu tinjauan toko. Sampai
   rilis mendarat, satu-satunya cara memperbaiki token seorang guru adalah
   menunggu.
-- **Tinggi** — kunci rahasia FCM pernah tertulis apa adanya di tiga berkas di
-  dua repositori publik. Kuncinya kini dibaca dari
-  `/DATA/k1807225/config/fcm-classync.php`, tapi **rotasinya belum selesai**:
-  kunci lamanya sudah telanjur masuk riwayat Git yang permanen, jadi
-  memindahkannya saja tidak cukup. Siapa pun yang memegangnya bisa mengirim
-  notifikasi ke ponsel guru mana pun atas nama sekolah.
-
-  Berkas konfigurasi itu memuat dua hal, dan pemisahannya disengaja:
-  `$fcm_secret` adalah kunci yang **dikirim** kedua pemanggil, sedangkan
-  `$fcm_secrets_sah` adalah daftar kunci yang **diterima** `send_fcm_api.php`.
-  Karena penerimanya menerima daftar, sisa rotasinya tidak menuntut deploy kode
-  sama sekali — cukup menyunting satu berkas di server:
-
-      3. tambah kunci baru ke $fcm_secrets_sah  → penerima menerima dua-duanya
-      4. ganti $fcm_secret jadi kunci baru      → pengirim beralih
-      5. amati beberapa hari, cabut kunci lama  → rotasi tuntas
-
-  Urutan itu penting karena kegagalannya **senyap**: kalau pengirim dan
-  penerima tidak sepakat, `send_fcm_api.php` menolak dan approval tetap
-  berhasil — yang hilang hanya pemberitahuan ke guru. Kini penolakan itu
-  tercatat ke `error_log` di kedua pemanggil, jadi fase 3-5 bisa diawasi,
-  bukan sekadar diharapkan.
-
-  Jangan menulis kunci apa pun — lama maupun baru — ke berkas di dalam Git,
-  termasuk ke berkas ini.
 - **Tinggi** — batas ukuran unggahan belum lengkap. `upload_max_filesize` dan
   `post_max_size` keduanya **100M** di MultiPHP INI Editor, `getimagesize()`
   hanya membaca header, dan endpointnya tanpa autentikasi — seratus permintaan
@@ -348,6 +323,29 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Kunci rahasia FCM tertulis di kode~~ — kunci yang dipakai kedua pemanggil
+  approval untuk menembak `send_fcm_api.php` pernah tertulis apa adanya di
+  tiga berkas di dua repositori publik. Dipindah ke
+  `/DATA/k1807225/config/fcm-classync.php` (commit `4958e4d` repo API,
+  `d4819b1` repo ini), lalu **dirotasi** 21 September 2026 — memindahkan saja
+  tidak cukup, karena kunci lamanya permanen di riwayat Git.
+
+  Berkas konfigurasi memuat dua hal, dan pemisahannya disengaja: `$fcm_secret`
+  kunci yang **dikirim**, `$fcm_secrets_sah` daftar kunci yang **diterima**.
+  Karena penerima menerima daftar, rotasinya tidak menuntut deploy sama sekali:
+  tambah kunci baru ke daftar, alihkan pengirim, lalu cabut yang lama. Kalau
+  perlu diulang, urutan itu yang dipakai.
+
+  Terverifikasi: dengan kunci lama, `curl` ke `send_fcm_api.php` dijawab
+  `Kunci Rahasia Salah`; setelah kunci lama dikembalikan sementara ke daftar,
+  jawabannya berubah jadi galat token dari Google — bukti bahwa pencabutan itu
+  yang menentukan. Setelah pencabutan, approval sungguhan tetap membunyikan
+  notifikasi. Perubahan pada berkas konfigurasi berlaku seketika.
+
+  Kegagalan di jalur ini **senyap** bagi pengguna — approval tetap berhasil,
+  yang hilang hanya pemberitahuan — tapi sejak `4958e4d` penolakannya tercatat
+  ke `error_log` kedua pemanggil. Jangan menulis kunci apa pun, lama maupun
+  baru, ke berkas di dalam Git, termasuk ke berkas ini.
 - ~~`admin/approval_absensi.php` tidak idempoten~~ — ditutup lewat lima commit
   di dua repo: `d143f39`, `99ab1b9`, `db58ada` di panel web, lalu `9cca477` di
   repo API dan `eca427d` untuk `status_jadwal`. Kedua jalur approval kini
