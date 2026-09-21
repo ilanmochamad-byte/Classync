@@ -150,6 +150,40 @@ sedang dipakai; sistem mati seketika.
 Karena seluruh kode membaca satu berkas di luar webroot, rotasi tidak lagi
 memerlukan deploy kode sama sekali.
 
+## Notifikasi: dua jalur dan tiga bentuk token
+
+Ada **dua** jalur pengiriman yang terpisah, dan keduanya mudah dikira satu:
+
+| Jalur | Berkas pengirim | Lewat |
+|---|---|---|
+| proksi | `admin/approval_absensi.php`, `proses_approval_absensi.php` | `send_fcm_api.php` |
+| langsung | `kirim_notifikasi_harian.php`, `admin_notifikasi.php` (dua repo) | `fcm.googleapis.com` |
+
+Perbaikan pada `send_fcm_api.php` **tidak** menyentuh jalur kedua. Justru jalur
+kedua yang pengirim terbesar: seluruh guru, setiap hari.
+
+ClassyncApp memanggil `getDevicePushTokenAsync()`, yang mengembalikan token
+**asli platform** — bukan satu bentuk seragam:
+
+| Bentuk | Asal | Tujuan yang benar |
+|---|---|---|
+| mengandung `:`, ~142 karakter | Android | FCM v1 |
+| heksadesimal murni, 64-160 karakter | iOS (APNs) | `api.push.apple.com` |
+| `ExponentPushToken[...]`, 41 karakter | sisa sebelum 13 Jul 2026 | tidak ada — perlu daftar ulang |
+
+Panjangnya saja bukan bukti. Token APNs dari iOS versi baru bisa 160 karakter,
+dan itu pernah saya simpulkan sebagai token FCM — keliru. Pembedanya titik dua:
+token FCM selalu memuatnya, token APNs tidak pernah.
+
+Sensus 20 September 2026, dari 21 guru sungguhan: **8 FCM, 10 APNs, 2 Expo,
+1 kosong.** Hanya delapan yang bisa dihubungi.
+
+`error_log` ada **per situs**. Baris dari pemanggil ada di
+`smkt.alhasan.co.id/classync/error_log`, sedangkan baris dari `send_fcm_api.php`
+dan penolong APNs ada di `api.smkt.alhasan.co.id/error_log`. Mencari di situs
+yang salah menghasilkan log kosong, dan log kosong gampang disalahartikan
+sebagai "tidak terjadi apa-apa".
+
 ## Temuan audit
 
 Daftar ini ditinjau audit independen pada 14 September 2026, di luar pekerjaan
@@ -169,6 +203,34 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   yang dikirim milik guru tersebut. Ini proyek migrasi token empat fase yang
   dikunci di `CLAUDE.md` repo API; jangan menegakkan autentikasi tanpa
   melewati keempat fasenya, karena aplikasi versi lama akan mati.
+- **Kritis** — notifikasi ke guru pengguna iPhone mati sejak 13 Juli 2026.
+  Pada tanggal itu ClassyncApp beralih dari `getExpoPushTokenAsync()` ke
+  `getDevicePushTokenAsync()`, yang di iOS mengembalikan token APNs — dan
+  token APNs tidak akan pernah diterima FCM v1. Sepuluh dari 21 guru dalam
+  keadaan itu, ditambah 2 bertoken Expo dan 1 kosong: **13 tidak bisa
+  dihubungi.** Dua bulan tanpa gejala, karena respons FCM tidak pernah
+  diperiksa; baru terlihat setelah commit `4958e4d` mencatatnya ke log.
+
+  **Ditangani sementara** oleh `includes/pengirim_apns.php` di repo API
+  (commit `196f452`, `181d5d4`): `send_fcm_api.php` memilah menurut bentuk
+  token dan mengirim token APNs langsung ke Apple. Itu bekerja dengan token
+  yang **sudah ada** di basis data, jadi tidak menuntut rilis aplikasi.
+  Tetapi jalur itu belum pernah terbukti mengantar sampai ke ponsel —
+  pengujian terhalang token basi pada perangkat uji.
+
+  Penyelesaian sebenarnya ada di aplikasi, dan belum diputuskan: memakai
+  SDK Firebase iOS supaya tokennya FCM sejati, atau kembali ke Expo Push
+  yang menangani kedua platform. Begitu satu bentuk token dipakai,
+  `includes/pengirim_apns.php` **tinggal dicabut seluruhnya** — ia memang
+  ditulis untuk dibuang.
+- **Tinggi** — ClassyncApp tidak pernah mendaftarkan ulang push token.
+  `registerForPushNotificationsAsync()` punya **dua** jalan pintas
+  `expo-secure-store`, dan keduanya keluar sebelum server dihubungi.
+  Akibatnya token yang salah di basis data tidak pernah bisa diperbaiki —
+  tidak dengan memasang ulang, tidak dengan logout. **Sudah diperbaiki di
+  sumber**, commit `aa255aa` versi 2.9.2, menunggu tinjauan toko. Sampai
+  rilis mendarat, satu-satunya cara memperbaiki token seorang guru adalah
+  menunggu.
 - **Tinggi** — kunci rahasia FCM pernah tertulis apa adanya di tiga berkas di
   dua repositori publik. Kuncinya kini dibaca dari
   `/DATA/k1807225/config/fcm-classync.php`, tapi **rotasinya belum selesai**:
@@ -212,19 +274,22 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   sebagian, belum kebal polyglot. Pola yang benar ada di repo API, `6c77656`.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
   percobaan, tanpa token CSRF di form admin.
+- **Sedang** — `kirim_notifikasi_harian.php` dirancang untuk cron tapi tidak
+  punya penjaga apa pun: tidak ada cek `php_sapi_name()`, dan berkasnya ada di
+  webroot. Siapa pun yang membuka URL-nya memicu notifikasi ke seluruh guru,
+  berkali-kali sesukanya. Ia juga menembak Google langsung tanpa memeriksa
+  jawabannya, jadi kegagalannya senyap seperti jalur proksi dulu.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
   sudah menyediakan `$conn`.
-- **Sedang** — zona waktu di ClassyncApp: `date.toISOString()` menghasilkan
-  UTC, jadi antara 00.00-07.00 WIB tanggal yang dikirim mundur satu hari.
-  **Sudah diperbaiki di sumber** — commit `26576d8`, penolong di
-  `utils/tanggal.ts` — tapi belum sampai ke guru: tidak ada OTA, jadi butuh
-  build EAS dan tinjauan toko. Sampai rilis mendarat, versi lama tetap
-  mengirim tanggal mundur dan basis data menerima campuran keduanya.
 - **Rendah** — blok `catch` di keempat endpoint unggah repo API mengirim
   `$e->getMessage()` mentah ke aplikasi. Pesannya biasanya pesan aplikasi yang
   berguna bagi guru ("Foto bukti wajib diupload"), tapi eksepsi basis data
   bocor lewat jalur yang sama. Memperbaikinya berarti memisahkan eksepsi
   aplikasi dari eksepsi sistem.
+- **Rendah** — `save_token.php` di repo API tampaknya kode mati: ia menulis ke
+  kolom `expo_push_token`, bukan `push_token`, dan tidak ada satu pun layar di
+  ClassyncApp yang memanggilnya. Tanpa autentikasi, jadi siapa pun bisa menimpa
+  kolom itu untuk `guru_id` mana pun. Layak dihapus setelah dipastikan.
 - **Rendah** — `app/absen_hp_backup.tsx:115` dan `:167` di ClassyncApp masih
   memakai `toISOString()`. Namanya terdengar seperti berkas cadangan, tapi di
   Expo Router **setiap berkas di `app/` adalah rute hidup** — `/absen_hp_backup`
@@ -275,6 +340,16 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   `DATE(waktu_absensi)` bukan indeks: InnoDB akan mengunci terlalu banyak baris
   di `absensi`, tabel tersibuk, dan menahan absen guru lain. Celah sepersekian
   detik untuk dua kiriman yang benar-benar bersamaan masih ada.
+- ~~Zona waktu di ClassyncApp mengirim tanggal mundur sehari~~ —
+  `date.toISOString()` menghasilkan UTC, jadi antara 00.00-07.00 WIB tanggal
+  yang dikirim mundur satu hari. Diperbaiki commit `26576d8` dengan penolong di
+  `utils/tanggal.ts`, dan **sudah sampai ke guru**: `ec3af18` yang menyetel
+  versi 2.9.1 memuat `26576d8` sebagai leluhurnya, dan 2.9.1 sudah beredar.
+
+  Catatan ini sempat tertulis sebagai "belum sampai ke guru" dan itu keliru —
+  dokumen ini tidak diperbarui setelah rilisnya. Versi lama tetap beredar
+  berminggu-minggu, jadi basis data masih menerima campuran keduanya sampai
+  semua guru memperbarui.
 - ~~SQL injection di `get_monitoring_absensi.php`~~ — prepared statement,
   commit `e6a567f` repo API. Endpoint itu juga tidak lagi mengirim pesan galat
   mentah ke pemanggil. Sapuan ulang seluruh repo API tidak menemukan endpoint
@@ -418,3 +493,10 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   `htmlspecialchars(json_encode($v), ENT_QUOTES, 'UTF-8')` — dua lapis,
   masing-masing untuk konteksnya. Dan uji dengan **mengklik**: kegagalan di
   sini senyap, halaman tetap tampil normal dan tidak ada galat apa pun.
+- Jangan menganggap memasang ulang aplikasi membersihkan `expo-secure-store`
+  di iOS. Ia memakai Keychain, dan Keychain **bertahan melewati penghapusan
+  aplikasi** — berbeda dari Android. Saran "pasang ulang saja" pernah
+  diberikan atas dasar itu dan terbukti tidak berguna: token di basis data
+  tidak berubah, dan menghapus barisnya pun tidak membuat aplikasi menulis
+  ulang. Kalau sebuah nilai harus bisa disetel ulang, aplikasinya sendiri yang
+  harus menghapusnya.
