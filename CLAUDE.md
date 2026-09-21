@@ -72,6 +72,14 @@ menghasilkan 403 untuk apa pun — termasuk berkas yang sah dan berkas yang
 tidak ada. Sertakan `-A` dengan User-Agent peramban, atau hasilnya
 menyesatkan.
 
+**Setelan PHP.** `php -i` di terminal cPanel menampilkan setelan **CLI**, bukan
+setelan web, dan keduanya berbeda jauh di sini: CLI `upload_max_filesize` 2M
+dan `post_max_size` 8M, sementara web keduanya 100M. Nilai yang berlaku saat
+guru mengunggah foto ada di **MultiPHP INI Editor**, per domain. Membaca
+`php -i` lalu menyimpulkan batas web sudah pernah terjadi di sini, dan arah
+kekeliruannya berbahaya: ia membuat masalah tampak jauh lebih kecil daripada
+yang sebenarnya.
+
 ## Tiga repositori yang bekerja bersama
 
 | Folder | Isi | Deploy |
@@ -256,12 +264,38 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
   Jangan menulis kunci apa pun — lama maupun baru — ke berkas di dalam Git,
   termasuk ke berkas ini.
-- **Tinggi** — tidak ada batas ukuran berkas unggahan. `upload_max_filesize`
-  100 MB, `getimagesize()` hanya perlu membaca header, dan endpointnya tanpa
-  autentikasi — seratus permintaan JPEG sah berpadding bisa memakan hampir
-  10 GB. Perbaikannya: batas eksplisit sekitar 5 MB sebelum `getimagesize()`,
-  samakan `post_max_size`, dan pertimbangkan re-encode gambar untuk membuang
-  muatan yang menempel di belakang.
+- **Tinggi** — batas ukuran unggahan belum lengkap. `upload_max_filesize` dan
+  `post_max_size` keduanya **100M** di MultiPHP INI Editor, `getimagesize()`
+  hanya membaca header, dan endpointnya tanpa autentikasi — seratus permintaan
+  JPEG sah berpadding bisa memakan hampir 10 GB.
+
+  **Lapis kode sudah terpasang**: commit `4ee3eb3` repo API memberi batas 8 MB
+  di keempat endpoint unggah lewat `includes/pesan_unggah.php`. Tapi itu lapis
+  kedua — saat baris pemeriksanya jalan, PHP sudah menerima berkasnya. Yang
+  **masih terbuka adalah lapis pertama**, di MultiPHP INI Editor, kedua domain:
+
+      upload_max_filesize   100M  ->   8M
+      post_max_size         100M  ->  16M
+
+  Angka 8 MB berasal dari sensus 5.036 foto produksi, 21 September 2026:
+  median 0,03 MB, p95 2,60 MB, p99 4,13 MB, terbesar 23,54 MB. Hanya **satu**
+  berkas melewati 8 MB, jadi batas itu memberi margin dua kali lipat di atas
+  p99 tanpa memotong apa pun yang sah.
+
+  `post_max_size` sengaja lebih longgar dan **tidak boleh disamakan** dengan
+  `upload_max_filesize`: `absen-siswa.tsx` mengirim foto sebagai base64 di
+  dalam JSON, bukan sebagai unggahan berkas, sehingga `upload_max_filesize`
+  tidak menyentuhnya sama sekali — yang membatasinya hanya `post_max_size`,
+  dan base64 menggelembungkan ukurannya sekitar 33%.
+
+  Urutan penerapannya penting: **deploy kode dulu, baru turunkan batas
+  server.** Menurunkan batas lebih dulu membuat `UPLOAD_ERR_INI_SIZE` sering
+  terjadi sementara endpoint lama masih menjawabnya dengan "Foto bukti wajib
+  diupload." — pesan yang membingungkan guru yang fotonya jelas terlampir.
+
+  Angka 100 MB di butir ini sempat saya ragukan setelah membaca `php -i` di
+  terminal, yang menampilkan 2M. Saya yang keliru: itu setelan CLI. Lihat
+  "Setelan PHP" di bagian atas.
 - **Sedang** — lima jalur unggah di repo ini menerima berkas tanpa memeriksa
   isinya: `admin/siswa.php:63`, `admin/proses_edit_profil.php:33`,
   `admin/absensi_manual.php:46` dan `:84`, serta
