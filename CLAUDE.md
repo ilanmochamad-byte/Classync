@@ -265,13 +265,16 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   jalur production berhasil pada percobaan pertama, dan fallback ke sandbox
   belum pernah terpakai.
 
-  **Tautan-dalamnya belum terbukti.** Catatan sebelumnya di sini menyatakan
-  sudah, dan itu keliru: uji pertama dilakukan saat aplikasi kebetulan sudah
+  **Tautan-dalam sempat salah dicatat terbukti.** Catatan sebelumnya di sini
+  menyatakan sudah, dan itu keliru: uji pertama dilakukan saat aplikasi kebetulan sudah
   terbuka di halaman tujuannya sendiri. Dari halaman lain, menekan notifikasi
   tidak berpindah. Penyebabnya, untuk notifikasi jarak jauh `expo-notifications`
   mengisi `content.data` **hanya dari kunci `body`** (`NotificationRecords.swift`,
   `serializedNotificationData()`), sedangkan payload menaruh `screen` di tingkat
-  atas. Diperbaiki commit `2a4d1a5` — belum diuji. Ujilah dari halaman **lain**.
+  atas. Diperbaiki commit `2a4d1a5`, dan **terverifikasi 22 September 2026**
+  di iPhone dengan aplikasi berjalan di latar dan terbuka di halaman lain:
+  menekan notifikasi membuka riwayat pengajuan. Tautan-dalam di **Android**
+  belum pernah diuji — jalurnya berbeda, lewat `data` di payload FCM.
 
   Peluncuran dari keadaan mati (aplikasi dihapus dari latar) tetap tidak
   berpindah halaman walau payload-nya benar: `_layout.tsx` hanya memakai
