@@ -1,6 +1,7 @@
 <?php
 session_start();
 require '../includes/db.php';
+require_once __DIR__ . '/../includes/unggah_gambar.php';
 
 if (!isset($_SESSION['guru_logged_in'])) {
     header('Location: ../login_guru.php');
@@ -21,22 +22,32 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $pendidikan_s3 = $_POST['pendidikan_s3'];
     $tugas_tambahan = $_POST['tugas_tambahan'];
 
-    $foto_path_db = $_POST['foto_lama']; // Gunakan foto lama sebagai default
+    // Foto lama dibaca dari basis data, BUKAN dari $_POST['foto_lama']. Dulu
+    // nilai kiriman itu dipakai mentah di dua tempat: digabung ke path lalu
+    // di-unlink(), dan disimpan ke kolom foto_profil. Guru mana pun yang
+    // login bisa mengirim foto_lama=../../../config/db-classync.php dan
+    // menghapus konfigurasi basis data — seluruh sistem mati. Lubang yang
+    // sama sudah ditutup di repo API lewat commit 188c705. Kolom tersembunyi
+    // foto_lama di formulir sengaja dibiarkan; nilainya kini diabaikan.
+    $stmt_lama = $conn->prepare("SELECT foto_profil FROM guru WHERE id = ?");
+    $stmt_lama->bind_param("i", $guru_id);
+    $stmt_lama->execute();
+    $baris_lama = $stmt_lama->get_result()->fetch_assoc();
+    $stmt_lama->close();
+    $foto_lama_db = $baris_lama['foto_profil'] ?? '';
+    $foto_path_db = $foto_lama_db;
 
-    // Proses upload foto baru jika ada
-    if (isset($_FILES['foto_profil']) && $_FILES['foto_profil']['error'] == 0) {
-        $target_dir = "../uploads/guru/";
-        if (!is_dir($target_dir)) { mkdir($target_dir, 0755, true); }
-        $file_name = "guru-" . $guru_id . "-" . time() . basename($_FILES["foto_profil"]["name"]);
-        $target_file = $target_dir . $file_name;
-        
-        if (move_uploaded_file($_FILES["foto_profil"]["tmp_name"], $target_file)) {
-            // Hapus foto lama jika ada
-            if (!empty($foto_path_db) && file_exists("../".$foto_path_db)) {
-                unlink("../".$foto_path_db);
-            }
-            $foto_path_db = "uploads/guru/" . $file_name;
+    // Proses upload foto baru jika ada. Nama berkas kiriman klien tidak
+    // lagi masuk ke nama berkas, dan ekstensinya diambil dari tipe yang
+    // terdeteksi — lihat includes/unggah_gambar.php.
+    if (isset($_FILES['foto_profil']) && $_FILES['foto_profil']['error'] !== UPLOAD_ERR_NO_FILE) {
+        $hasil = simpanGambarUnggahan($_FILES['foto_profil'], __DIR__ . '/../uploads/guru/', 'guru-' . (int)$guru_id);
+        if (!$hasil['ok']) {
+            echo "Gagal menyimpan foto: " . htmlspecialchars($hasil['pesan']);
+            exit();
         }
+        hapusFotoLamaAman($foto_lama_db);
+        $foto_path_db = "uploads/guru/" . $hasil['nama'];
     }
 
     // Update data ke database
