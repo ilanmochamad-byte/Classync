@@ -73,12 +73,32 @@ tidak ada. Sertakan `-A` dengan User-Agent peramban, atau hasilnya
 menyesatkan.
 
 **Setelan PHP.** `php -i` di terminal cPanel menampilkan setelan **CLI**, bukan
-setelan web, dan keduanya berbeda jauh di sini: CLI `upload_max_filesize` 2M
-dan `post_max_size` 8M, sementara web keduanya 100M. Nilai yang berlaku saat
-guru mengunggah foto ada di **MultiPHP INI Editor**, per domain. Membaca
-`php -i` lalu menyimpulkan batas web sudah pernah terjadi di sini, dan arah
+setelan web — CLI `upload_max_filesize` 2M, web dulu 100M. Membaca `php -i`
+lalu menyimpulkan batas web sudah pernah terjadi di sini, dan arah
 kekeliruannya berbahaya: ia membuat masalah tampak jauh lebih kecil daripada
 yang sebenarnya.
+
+Kedua situs **tidak memakai PHP yang sama**, dan setelannya diatur di tempat
+yang berbeda:
+
+| Situs | PHP yang dipakai | Setelan yang berlaku ada di |
+|---|---|---|
+| `api.smkt.alhasan.co.id` | `ea-php80` | MultiPHP INI Editor → `php.ini` di akar situs |
+| `smkt.alhasan.co.id/classync/` | **`alt-php83`** (PHP Selector CloudLinux, SAPI `litespeed`) | blok `php_value` di **`classync/.htaccess`** |
+
+MultiPHP INI Editor untuk domain `smkt.alhasan.co.id` mengatur `ea-php81` dan
+**tidak menjangkau classync sama sekali**. `.user.ini` juga tidak diperlukan:
+pernah dicoba, lalu dihapus, dan nilainya tidak berubah. Blok `php_value` di
+`classync/.htaccess` dibuat cPanel dan bisa ditulis ulang kalau setelan PHP
+folder itu disimpan lagi dari antarmukanya — kalau batasnya suatu saat kembali
+100M, periksa di sana lebih dulu. `.htaccess` itu hanya ada di server;
+`.cpanel.yml` tidak menyalinnya.
+
+**Satu-satunya cara yang terbukti menunjukkan nilai yang sungguhan berlaku**:
+berkas PHP sementara bernama acak yang mencetak `ini_get()` dan
+`php_ini_loaded_file()`, dibuka lewat `curl -A "Mozilla/5.0"`, lalu langsung
+dihapus. Uji di tiap folder yang penting (`classync/`, `classync/admin/`,
+`classync/api/`), bukan hanya di akarnya.
 
 `/usr/bin/php` di server ini adalah **`php-cgi`** (SAPI `cgi-fcgi`), bukan
 PHP CLI — ia bahkan tidak mengenal opsi `-r`. Cron `kirim_notifikasi_harian.php`
@@ -219,38 +239,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   yang dikirim milik guru tersebut. Ini proyek migrasi token empat fase yang
   dikunci di `CLAUDE.md` repo API; jangan menegakkan autentikasi tanpa
   melewati keempat fasenya, karena aplikasi versi lama akan mati.
-- **Tinggi** — batas ukuran unggahan belum lengkap. `upload_max_filesize` dan
-  `post_max_size` keduanya **100M** di MultiPHP INI Editor, `getimagesize()`
-  hanya membaca header, dan endpointnya tanpa autentikasi — seratus permintaan
-  JPEG sah berpadding bisa memakan hampir 10 GB.
-
-  **Lapis kode sudah terpasang**: commit `4ee3eb3` repo API memberi batas 8 MB
-  di keempat endpoint unggah lewat `includes/pesan_unggah.php`. Tapi itu lapis
-  kedua — saat baris pemeriksanya jalan, PHP sudah menerima berkasnya. Yang
-  **masih terbuka adalah lapis pertama**, di MultiPHP INI Editor, kedua domain:
-
-      upload_max_filesize   100M  ->   8M
-      post_max_size         100M  ->  16M
-
-  Angka 8 MB berasal dari sensus 5.036 foto produksi, 21 September 2026:
-  median 0,03 MB, p95 2,60 MB, p99 4,13 MB, terbesar 23,54 MB. Hanya **satu**
-  berkas melewati 8 MB, jadi batas itu memberi margin dua kali lipat di atas
-  p99 tanpa memotong apa pun yang sah.
-
-  `post_max_size` sengaja lebih longgar dan **tidak boleh disamakan** dengan
-  `upload_max_filesize`: `absen-siswa.tsx` mengirim foto sebagai base64 di
-  dalam JSON, bukan sebagai unggahan berkas, sehingga `upload_max_filesize`
-  tidak menyentuhnya sama sekali — yang membatasinya hanya `post_max_size`,
-  dan base64 menggelembungkan ukurannya sekitar 33%.
-
-  Urutan penerapannya penting: **deploy kode dulu, baru turunkan batas
-  server.** Menurunkan batas lebih dulu membuat `UPLOAD_ERR_INI_SIZE` sering
-  terjadi sementara endpoint lama masih menjawabnya dengan "Foto bukti wajib
-  diupload." — pesan yang membingungkan guru yang fotonya jelas terlampir.
-
-  Angka 100 MB di butir ini sempat saya ragukan setelah membaca `php -i` di
-  terminal, yang menampilkan 2M. Saya yang keliru: itu setelan CLI. Lihat
-  "Setelan PHP" di bagian atas.
 - **Sedang** — notifikasi iOS berjalan lewat penanganan sementara. Sejak
   13 Juli 2026 ClassyncApp memakai `getDevicePushTokenAsync()`, yang di iOS
   mengembalikan token APNs — dan token APNs tidak akan pernah diterima FCM v1.
@@ -341,6 +329,33 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Tidak ada batas ukuran berkas unggahan~~ — dua lapis, keduanya kini
+  terpasang. Dulu `upload_max_filesize` dan `post_max_size` 100M di kedua situs,
+  `getimagesize()` hanya membaca header, dan endpoint API tanpa autentikasi —
+  seratus permintaan JPEG sah berpadding bisa memakan hampir 10 GB.
+
+  **Lapis kode**: batas 8 MB di keempat endpoint unggah repo API
+  (`includes/pesan_unggah.php`, commit `4ee3eb3`) dan di semua jalur unggah
+  repo ini (`includes/unggah_gambar.php`, fase 1-3). **Lapis server**,
+  diterapkan 22 September 2026 dan diuji per folder dengan `ini_get()`:
+
+      api.smkt.alhasan.co.id          8M / 16M   MultiPHP INI Editor
+      classync/, admin/, api/          8M / 16M   php_value di classync/.htaccess
+
+  Angka 8 MB dari sensus 5.036 foto produksi, 21 September 2026: median
+  0,03 MB, p95 2,60 MB, p99 4,13 MB, terbesar 23,54 MB — hanya satu berkas di
+  atas 8 MB. `post_max_size` sengaja 16M, bukan disamakan: `absen-siswa.tsx`
+  mengirim foto sebagai base64 di dalam JSON, yang tidak disentuh
+  `upload_max_filesize` sama sekali dan menggelembung sekitar 33%.
+
+  Lapis server classync sempat **tampak** sudah terpasang padahal belum:
+  MultiPHP INI Editor untuk domain `smkt` menyimpan 8M, tapi classync memakai
+  `alt-php83`, dan uji `ini_get()` di folder itu tetap menunjukkan 100M. Tanpa
+  uji per folder, butir ini akan tercatat tertutup dalam keadaan terbuka.
+
+  Terverifikasi 22 September 2026: absen mengajar dengan foto dari aplikasi
+  tersimpan (`absen-mengajar-9-1790080463-6687dcd5.jpg`) dan tampil di laporan
+  admin — batas baru tidak menolak foto yang sah.
 - ~~Penghapusan berkas sembarang di `proses_edit_profil.php`~~ — commit
   `8c59402`. `admin/proses_edit_profil.php` dan salinan identiknya di
   `guru_area/` memakai `$_POST['foto_lama']` mentah untuk `unlink()`. Guru
