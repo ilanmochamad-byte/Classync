@@ -70,9 +70,6 @@ require '../includes/db.php';
         <li class="nav-item">
           <a class="nav-link" href="penempatan_pkl.php">Penempatan PKL</a>
         </li>
-        <li class="nav-item">
-          <a class="nav-link" href="profil_guru.php">Profil Guru</a>
-        </li>
       <li class="nav-item dropdown">
           <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Keuangan</a>
           <ul class="dropdown-menu">

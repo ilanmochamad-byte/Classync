@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_siswa'])) {
     $id = $_POST['id'] ?? null;
     // Foto lama dibaca dari basis data, bukan dari $_POST['foto_lama'] —
     // dulu nilai kiriman itu dipakai mentah untuk unlink() dan disimpan ke
-    // kolom foto_siswa. Pola yang sama dengan proses_edit_profil.php.
+    // kolom foto_siswa, sehingga admin bisa menghapus berkas apa pun di server.
     $foto_lama = '';
     if ($id) {
         $stmt_lama = $conn->prepare("SELECT foto_siswa FROM siswa WHERE id = ?");
