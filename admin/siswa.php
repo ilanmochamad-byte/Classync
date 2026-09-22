@@ -1,5 +1,6 @@
 <?php 
 include 'partials/header.php';
+require_once __DIR__ . '/../includes/unggah_gambar.php';
 
 // --- FUNGSI BARU UNTUK MENAMPILKAN TOMBOL PAGINASI YANG LEBIH BAIK ---
 function renderPagination($currentPage, $totalPages) {
@@ -51,20 +52,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_siswa'])) {
     $kontak_ortu = $_POST['kontak_ortu'];
     $password = $_POST['password'];
     $id = $_POST['id'] ?? null;
-    $foto_lama = $_POST['foto_lama'] ?? '';
+    // Foto lama dibaca dari basis data, bukan dari $_POST['foto_lama'] —
+    // dulu nilai kiriman itu dipakai mentah untuk unlink() dan disimpan ke
+    // kolom foto_siswa. Pola yang sama dengan proses_edit_profil.php.
+    $foto_lama = '';
+    if ($id) {
+        $stmt_lama = $conn->prepare("SELECT foto_siswa FROM siswa WHERE id = ?");
+        $id_lama = (int)$id;
+        $stmt_lama->bind_param("i", $id_lama);
+        $stmt_lama->execute();
+        $baris_lama = $stmt_lama->get_result()->fetch_assoc();
+        $stmt_lama->close();
+        $foto_lama = $baris_lama['foto_siswa'] ?? '';
+    }
     $foto_path_db = $foto_lama;
 
-    // Proses upload foto baru jika ada
-    if (isset($_FILES['foto_siswa']) && $_FILES['foto_siswa']['error'] == 0) {
-        $target_dir = "../uploads/siswa/";
-        if (!is_dir($target_dir)) { mkdir($target_dir, 0755, true); }
-        $file_name = time() . '-' . basename($_FILES["foto_siswa"]["name"]);
-        $target_file = $target_dir . $file_name;
-        if (move_uploaded_file($_FILES["foto_siswa"]["tmp_name"], $target_file)) {
-            if (!empty($foto_lama) && file_exists("../".$foto_lama)) {
-                unlink("../".$foto_lama);
-            }
-            $foto_path_db = "uploads/siswa/" . $file_name;
+    // Proses upload foto baru jika ada — lihat includes/unggah_gambar.php.
+    if (isset($_FILES['foto_siswa']) && $_FILES['foto_siswa']['error'] !== UPLOAD_ERR_NO_FILE) {
+        $hasil = simpanGambarUnggahan($_FILES['foto_siswa'], __DIR__ . '/../uploads/siswa/', 'siswa');
+        if ($hasil['ok']) {
+            hapusFotoLamaAman($foto_lama);
+            $foto_path_db = "uploads/siswa/" . $hasil['nama'];
+        } else {
+            $pesan = "Error: " . $hasil['pesan'];
+            $pesan_tipe = "danger";
+            $is_error = true;
         }
     }
 
@@ -116,9 +128,9 @@ if (isset($_GET['hapus'])) {
     $stmt_hapus = $conn->prepare("DELETE FROM siswa WHERE id = ?");
     $stmt_hapus->bind_param("i", $id);
     if($stmt_hapus->execute()) {
-        if (!empty($foto_path) && file_exists("../".$foto_path)) {
-            unlink("../".$foto_path);
-        }
+        // Dipagari walau nilainya dari basis data: kolom itu dulu bisa diisi
+        // dari kiriman klien lewat foto_lama.
+        hapusFotoLamaAman($foto_path);
         $pesan = "Data siswa berhasil dihapus.";
         $pesan_tipe = "success";
     } else {

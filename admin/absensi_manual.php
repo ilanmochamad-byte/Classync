@@ -1,5 +1,6 @@
 <?php 
 include 'partials/header.php';
+require_once __DIR__ . '/../includes/unggah_gambar.php';
 
 // Ambil daftar guru untuk dropdown
 $guru_list = $conn->query("SELECT id, nama_guru FROM guru ORDER BY nama_guru ASC");
@@ -38,16 +39,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
         $pesan = "Error: Guru ini sudah memiliki catatan absensi untuk jadwal dan tanggal tersebut.";
         $tipe_pesan = "danger";
     } else {
-        // Upload Foto
-        if (isset($_FILES['foto_bukti']) && $_FILES['foto_bukti']['error'] == 0) {
-            $target_dir = "../uploads/";
-            $file_name = "manual-" . time() . '-' . basename($_FILES["foto_bukti"]["name"]);
-            $target_file = $target_dir . $file_name;
-            if (move_uploaded_file($_FILES["foto_bukti"]["tmp_name"], $target_file)) {
-                $foto_bukti_path = "uploads/" . $file_name;
+        // Upload Foto — opsional. Kalau diunggah tapi ditolak, absensinya
+        // TIDAK disimpan: dulu kegagalan diabaikan dan baris tersimpan tanpa
+        // foto, tanpa admin tahu. Lihat includes/unggah_gambar.php.
+        $gagal_foto = null;
+        if (isset($_FILES['foto_bukti']) && $_FILES['foto_bukti']['error'] !== UPLOAD_ERR_NO_FILE) {
+            $hasil = simpanGambarUnggahan($_FILES['foto_bukti'], __DIR__ . '/../uploads/', 'manual');
+            if ($hasil['ok']) {
+                $foto_bukti_path = "uploads/" . $hasil['nama'];
+            } else {
+                $gagal_foto = $hasil['pesan'];
             }
         }
 
+        if ($gagal_foto !== null) {
+            $pesan = "Absensi tidak disimpan: " . $gagal_foto;
+            $tipe_pesan = "danger";
+        } else {
         $stmt_insert = $conn->prepare("INSERT INTO absensi (guru_id, jadwal_id, tipe_absensi, waktu_absensi, status, keterangan, foto_bukti) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt_insert->bind_param("iisssss", $guru_id, $jadwal_id, $tipe_absensi, $waktu_absensi, $status, $keterangan, $foto_bukti_path);
         
@@ -58,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
             $pesan = "Gagal menyimpan: " . $stmt_insert->error;
             $tipe_pesan = "danger";
         }
+        } // akhir: foto diterima atau tidak diunggah
     }
 }
 
@@ -76,14 +85,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_otomatis'])) {
         $foto_auto_path = null;
         $count_success = 0;
 
-        // Upload Foto (Satu foto untuk semua inputan massal ini)
-        if (isset($_FILES['foto_bukti_otomatis']) && $_FILES['foto_bukti_otomatis']['error'] == 0) {
-            $target_dir = "../uploads/";
-            $file_name = "auto-" . time() . '-' . basename($_FILES["foto_bukti_otomatis"]["name"]);
-            $target_file = $target_dir . $file_name;
-            if (move_uploaded_file($_FILES["foto_bukti_otomatis"]["tmp_name"], $target_file)) {
-                $foto_auto_path = "uploads/" . $file_name;
+        // Upload Foto (Satu foto untuk semua inputan massal ini). Opsional;
+        // kalau diunggah tapi ditolak, tidak ada satu baris pun yang disimpan.
+        $gagal_foto = null;
+        if (isset($_FILES['foto_bukti_otomatis']) && $_FILES['foto_bukti_otomatis']['error'] !== UPLOAD_ERR_NO_FILE) {
+            $hasil = simpanGambarUnggahan($_FILES['foto_bukti_otomatis'], __DIR__ . '/../uploads/', 'auto');
+            if ($hasil['ok']) {
+                $foto_auto_path = "uploads/" . $hasil['nama'];
+            } else {
+                $gagal_foto = $hasil['pesan'];
             }
+        }
+        if ($gagal_foto !== null) {
+            $selected_gurus = [];   // lewati perulangan di bawah
         }
 
         foreach ($selected_gurus as $gid) {
@@ -113,7 +127,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_otomatis'])) {
             // Misalnya cek tabel jadwal_piket jika ada, lalu insert tipe_absensi='piket'
         }
 
-        if ($count_success > 0) {
+        if ($gagal_foto !== null) {
+            $pesan = "Absensi otomatis tidak disimpan: " . $gagal_foto;
+            $tipe_pesan = "danger";
+        } elseif ($count_success > 0) {
             $pesan = "Berhasil memproses absensi otomatis untuk $count_success jadwal pelajaran.";
             $tipe_pesan = "success";
         } else {
