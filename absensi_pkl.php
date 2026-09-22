@@ -3,6 +3,7 @@ session_start();
 date_default_timezone_set('Asia/Jakarta');
 ini_set('display_errors', 0);
 require_once 'includes/db.php'; 
+require_once __DIR__ . '/includes/unggah_gambar.php';
 
 function hitungJarak($lat1, $lon1, $lat2, $lon2) {
     $earth_radius = 6371000;
@@ -106,17 +107,24 @@ if($res_loc->num_rows > 0) {
 }
 $stmt_loc->close();
 
+// Mengembalikan ['ok' => true, 'path' => 'uploads/absensi_pkl/...'] atau
+// ['ok' => false, 'pesan' => '...']. Path relatif itu yang disimpan ke basis
+// data, dan halaman riwayat di bawah memeriksanya dengan file_exists() —
+// jadi bentuknya harus tetap 'uploads/absensi_pkl/<nama>'.
+//
+// Dulu ekstensi diambil dari nama kiriman tanpa daftar putih: getimagesize()
+// memang dipanggil, tapi berkas polyglot 'x.php' berheader GIF lolos dan
+// tersimpan sebagai .php. Yang menahannya hanya .htaccess di uploads/.
+// Sekarang ekstensi berasal dari tipe yang terdeteksi.
 function uploadFotoPKL($fileInputName) {
-    if (!isset($_FILES[$fileInputName]) || $_FILES[$fileInputName]['error'] != 0) return null;
-    $target_dir = "uploads/absensi_pkl/";
-    if (!is_dir($target_dir)) mkdir($target_dir, 0755, true);
-    $file_extension = strtolower(pathinfo($_FILES[$fileInputName]["name"], PATHINFO_EXTENSION));
-    $new_filename = "PKL_" . date('Ymd_His') . "_" . rand(100,999) . "." . $file_extension;
-    $target_file = $target_dir . $new_filename;
-    if(getimagesize($_FILES[$fileInputName]["tmp_name"]) !== false) {
-        if (move_uploaded_file($_FILES[$fileInputName]["tmp_name"], $target_file)) return $target_file;
+    if (!isset($_FILES[$fileInputName])) {
+        return ['ok' => false, 'pesan' => 'Foto bukti wajib diambil.'];
     }
-    return null;
+    $hasil = simpanGambarUnggahan($_FILES[$fileInputName], __DIR__ . '/uploads/absensi_pkl/', 'PKL_' . date('Ymd_His'));
+    if (!$hasil['ok']) {
+        return $hasil;
+    }
+    return ['ok' => true, 'path' => 'uploads/absensi_pkl/' . $hasil['nama']];
 }
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && (isset($_POST['absen_masuk']) || isset($_POST['absen_pulang']))) {
@@ -131,7 +139,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && (isset($_POST['absen_masuk']) || iss
     if ($jarak_real > $radius_izin) {
         $pesan_aksi = "<div class='alert alert-danger rounded-4 small fw-bold'><i class='bi bi-shield-x me-2'></i>Aksi Ditolak! Anda berada di luar area ($jarak_real m). Dilarang titip absen.</div>";
     } else {
-        $foto_path = uploadFotoPKL('foto_kamera');
+        $hasil_foto = uploadFotoPKL('foto_kamera');
+        $foto_path = $hasil_foto['ok'] ? $hasil_foto['path'] : null;
         if ($foto_path) {
             if (isset($_POST['absen_masuk'])) {
                 $status_masuk = (strtotime($jam_sekarang) <= strtotime('08:00:00')) ? 'Tepat Waktu' : 'Terlambat';
@@ -151,7 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && (isset($_POST['absen_masuk']) || iss
             }
             $stmt->close();
         } else {
-            $pesan_aksi = "<div class='alert alert-danger rounded-4 small'>Gagal memproses foto bukti.</div>";
+            $pesan_aksi = "<div class='alert alert-danger rounded-4 small'>Gagal memproses foto bukti: " . htmlspecialchars($hasil_foto['pesan']) . "</div>";
         }
     }
 }
