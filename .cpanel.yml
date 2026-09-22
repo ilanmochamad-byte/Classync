@@ -15,12 +15,13 @@ deployment:
     - export DEPLOYPATH=/DATA/k1807225/public_html/smkt.alhasan.co.id/classync
 
     # Folder kode — isi digabungkan, berkas lama yang tak ada di repo dibiarkan
-    - /bin/mkdir -p $DEPLOYPATH/admin $DEPLOYPATH/api $DEPLOYPATH/ceses $DEPLOYPATH/css $DEPLOYPATH/guru_area $DEPLOYPATH/includes
+    - /bin/mkdir -p $DEPLOYPATH/admin $DEPLOYPATH/api $DEPLOYPATH/ceses $DEPLOYPATH/css $DEPLOYPATH/includes
     - /bin/cp -Rf admin/.      $DEPLOYPATH/admin/
     - /bin/cp -Rf api/.        $DEPLOYPATH/api/
     - /bin/cp -Rf ceses/.      $DEPLOYPATH/ceses/
     - /bin/cp -Rf css/.        $DEPLOYPATH/css/
-    - /bin/cp -Rf guru_area/.  $DEPLOYPATH/guru_area/
+    # guru_area/ dihapus dari repo pada fase 4 pembersihan jalur unggah (web
+    # guru sudah tidak dipakai). Salinannya di server harus dihapus manual.
     - /bin/cp -Rf includes/.   $DEPLOYPATH/includes/
 
     # Berkas di akar
