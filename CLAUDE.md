@@ -80,6 +80,14 @@ guru mengunggah foto ada di **MultiPHP INI Editor**, per domain. Membaca
 kekeliruannya berbahaya: ia membuat masalah tampak jauh lebih kecil daripada
 yang sebenarnya.
 
+`/usr/bin/php` di server ini adalah **`php-cgi`** (SAPI `cgi-fcgi`), bukan
+PHP CLI — ia bahkan tidak mengenal opsi `-r`. Cron `kirim_notifikasi_harian.php`
+memanggil biner itu. Jadi penjaga "hanya dari cron" **tidak boleh** memeriksa
+`php_sapi_name() === 'cli'`; periksa `isset($_SERVER['REQUEST_METHOD'])`, yang
+selalu ada lewat HTTP dan tidak pernah ada dari cron. Pemeriksaan SAPI pernah
+dipasang di sini dan mematikan pengingat pagi seluruh guru, tanpa satu baris
+log pun.
+
 ## Tiga repositori yang bekerja bersama
 
 | Folder | Isi | Deploy |
@@ -211,14 +219,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   yang dikirim milik guru tersebut. Ini proyek migrasi token empat fase yang
   dikunci di `CLAUDE.md` repo API; jangan menegakkan autentikasi tanpa
   melewati keempat fasenya, karena aplikasi versi lama akan mati.
-- **Tinggi** — ClassyncApp tidak pernah mendaftarkan ulang push token.
-  `registerForPushNotificationsAsync()` punya **dua** jalan pintas
-  `expo-secure-store`, dan keduanya keluar sebelum server dihubungi.
-  Akibatnya token yang salah di basis data tidak pernah bisa diperbaiki —
-  tidak dengan memasang ulang, tidak dengan logout. **Sudah diperbaiki di
-  sumber**, commit `aa255aa` versi 2.9.2, menunggu tinjauan toko. Sampai
-  rilis mendarat, satu-satunya cara memperbaiki token seorang guru adalah
-  menunggu.
 - **Tinggi** — batas ukuran unggahan belum lengkap. `upload_max_filesize` dan
   `post_max_size` keduanya **100M** di MultiPHP INI Editor, `getimagesize()`
   hanya membaca header, dan endpointnya tanpa autentikasi — seratus permintaan
@@ -288,8 +288,12 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   supaya tokennya FCM sejati, atau (B) kembali ke Expo Push yang menangani
   kedua platform. Tidak mendesak; setelah salah satunya rilis,
   `includes/pengirim_apns.php` **tinggal dicabut seluruhnya** — ia memang
-  ditulis untuk dibuang. Kedua, tiga guru (dua bertoken Expo, satu kosong)
-  baru bisa dihubungi setelah 2.9.2 membuat mereka mendaftar ulang.
+  ditulis untuk dibuang. Kedua, dari tiga guru yang tokennya tidak bisa
+  dipakai (dua bertoken Expo, satu kosong), baru guru 17 yang terbukti sudah
+  mendaftar ulang lewat 2.9.2 — pengingatnya terkirim 22 September. Guru 18
+  (Expo) dan guru 22 (kosong) akan ikut begitu mereka membuka 2.9.2; periksa
+  bentuk `push_token` mereka di tabel `guru` — cara membedakannya ada di
+  bagian "Notifikasi" di atas.
 - **Sedang** — lima jalur unggah di repo ini menerima berkas tanpa memeriksa
   isinya: `admin/siswa.php:63`, `admin/proses_edit_profil.php:33`,
   `admin/absensi_manual.php:46` dan `:84`, serta
@@ -302,11 +306,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   sebagian, belum kebal polyglot. Pola yang benar ada di repo API, `6c77656`.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
   percobaan, tanpa token CSRF di form admin.
-- **Sedang** — `kirim_notifikasi_harian.php` dirancang untuk cron tapi tidak
-  punya penjaga apa pun: tidak ada cek `php_sapi_name()`, dan berkasnya ada di
-  webroot. Siapa pun yang membuka URL-nya memicu notifikasi ke seluruh guru,
-  berkali-kali sesukanya. Ia juga menembak Google langsung tanpa memeriksa
-  jawabannya, jadi kegagalannya senyap seperti jalur proksi dulu.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
   sudah menyediakan `$conn`.
 - **Rendah** — blok `catch` di keempat endpoint unggah repo API mengirim
@@ -326,6 +325,37 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~`kirim_notifikasi_harian.php` tanpa penjaga dan buta terhadap iOS~~ —
+  pengirim terbesar sistem ini: seluruh guru, setiap pagi pukul 07.00. Dulu ia
+  bisa dipicu siapa pun lewat URL, mengirim semua token ke FCM sehingga guru
+  iPhone tidak pernah menerima pengingat, dan tidak memeriksa jawaban Google
+  sama sekali. Commit `dd7774b` repo API memilah token lewat
+  `includes/pengirim_apns.php`, mencatat kegagalan ke `error_log` per guru,
+  memasang penjaga cron, dan menyalakan kembali verifikasi TLS.
+
+  Penjaga cron di `dd7774b` **salah** dan mematikan pengingat seluruh guru pada
+  22 September 2026: ia memeriksa `php_sapi_name() === 'cli'`, padahal
+  `/usr/bin/php` di sini `php-cgi`. Nol pengingat tersimpan pagi itu, dibanding
+  11 sehari sebelumnya, dan log tetap bersih karena keluarannya ke `/dev/null`.
+  Kesimpulan "pasti CLI" saya ambil dari tidak adanya `REQUEST_METHOD` — yang
+  hanya membuktikan skripnya tidak dipanggil lewat HTTP. Diperbaiki commit
+  `548f199` dengan memeriksa `REQUEST_METHOD` langsung.
+
+  Terverifikasi 22 September 2026 lewat pemanggilan manual dengan biner yang
+  sama dengan cron: 10 dari 10 guru terkirim, empat di antaranya (guru 3, 4, 5,
+  8) lewat APNs — pengingat harian pertama yang sampai ke iPhone sejak Juli.
+  Log yang kosong di sini **tidak** membuktikan apa pun; yang membuktikan cron
+  berjalan adalah baris baru di tabel `notifikasi` dengan judul
+  `Pengingat Jadwal Classync`.
+- ~~ClassyncApp tidak pernah mendaftarkan ulang push token~~ —
+  `registerForPushNotificationsAsync()` punya dua jalan pintas
+  `expo-secure-store` yang keluar sebelum server dihubungi, dan Keychain iOS
+  bertahan melewati pemasangan ulang, sehingga token yang salah di basis data
+  tidak pernah bisa diperbaiki. Commit `aa255aa` membuang keduanya: token kini
+  dikirim ke server setiap peluncuran. Rilis sebagai 2.9.2 dan sudah beredar.
+  Bukti di produksi: guru 17 memegang token Expo pada 20 September, dan pada
+  22 September pengingatnya terkirim — tokennya sudah berganti, yang hanya
+  mungkin lewat pendaftaran ulang.
 - ~~Kunci rahasia FCM tertulis di kode~~ — kunci yang dipakai kedua pemanggil
   approval untuk menembak `send_fcm_api.php` pernah tertulis apa adanya di
   tiga berkas di dua repositori publik. Dipindah ke
