@@ -294,16 +294,32 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   (Expo) dan guru 22 (kosong) akan ikut begitu mereka membuka 2.9.2; periksa
   bentuk `push_token` mereka di tabel `guru` — cara membedakannya ada di
   bagian "Notifikasi" di atas.
-- **Sedang** — lima jalur unggah di repo ini menerima berkas tanpa memeriksa
-  isinya: `admin/siswa.php:63`, `admin/proses_edit_profil.php:33`,
-  `admin/absensi_manual.php:46` dan `:84`, serta
-  `guru_area/proses_edit_profil.php:33` (folder mati). Tiga yang pertama
-  halaman admin yang dipakai TU sehari-hari. Keparahannya di bawah endpoint
-  API yang sudah ditutup, karena semuanya menuntut sesi admin lebih dulu.
-  Lima jalur lain (`absensi_pkl.php`, `guru_area/absen.php`,
-  `guru_area/proses_absen.php`, `api/profil.php`, `api/absen.php`) sudah
-  memakai `getimagesize()` tapi ekstensinya masih dari klien — terlindungi
-  sebagian, belum kebal polyglot. Pola yang benar ada di repo API, `6c77656`.
+- **Sedang** — jalur unggah repo ini: **menunggu uji** untuk dua fase.
+  Pekerjaan empat fase (September 2026) memindahkan semua unggahan ke penolong
+  bersama `includes/unggah_gambar.php`: ekstensi dari tipe yang terdeteksi
+  `getimagesize()`, nama kiriman tidak masuk ke nama berkas, batas 8 MB, dan
+  `hapusFotoLamaAman()` yang dipagari `realpath()` ke dalam `uploads/`.
+  Fase 1 dan 4 sudah ditutup (lihat "Sudah ditutup"). Yang **belum diuji**:
+
+  - Fase 2, `absensi_pkl.php` (commit `2569f6f`) — dipakai siswa PKL. Dulu
+    ekstensi diambil dari nama kiriman tanpa daftar putih, sehingga polyglot
+    `x.php` tersimpan sebagai `.php`. Uji: satu absen PKL sungguhan, lalu
+    klik thumbnail di riwayat — modalnya harus terbuka.
+  - Fase 3, `admin/siswa.php` dan kedua jalur `admin/absensi_manual.php`
+    (commit `9c10504`). `siswa.php` juga memakai `$_POST['foto_lama']` mentah
+    untuk `unlink()` — lubang yang sama dengan fase 1, di sini terbatas pada
+    admin. Uji: ganti foto siswa, simpan absensi manual dengan foto, dan
+    pastikan berkas bukan gambar ditolak tanpa menyimpan baris.
+
+  Unggahan yang ditolak kini menghentikan penyimpanan dengan pesan; dulu
+  kegagalan diabaikan dan baris tersimpan tanpa foto. Tutup butir ini setelah
+  kedua uji berhasil.
+- **Sedang** — SQL injection di jalur otomatis (massal) `admin/absensi_manual.php`:
+  `$conn->query("SELECT id FROM absensi WHERE guru_id=$gid AND jadwal_id=$jid
+  AND DATE(waktu_absensi)='$tanggal_pilih'")`, dengan `$gid` dan
+  `$tanggal_pilih` langsung dari formulir. Terbatas pada admin, jadi bobotnya
+  di bawah endpoint tanpa autentikasi, tapi tetap harus jadi prepared
+  statement. Ditemukan saat fase 3 dan sengaja tidak disentuh di sana.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
   percobaan, tanpa token CSRF di form admin.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
@@ -325,6 +341,37 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Penghapusan berkas sembarang di `proses_edit_profil.php`~~ — commit
+  `8c59402`. `admin/proses_edit_profil.php` dan salinan identiknya di
+  `guru_area/` memakai `$_POST['foto_lama']` mentah untuk `unlink()`. Guru
+  mana pun yang login lewat web bisa mengirim
+  `foto_lama=../../../config/db-classync.php` dan mematikan seluruh sistem —
+  lubang yang sama dengan `update_profil_guru.php` di repo API (`188c705`),
+  terlewat di panel web. Foto lama kini dibaca dari basis data, dan
+  penghapusannya lewat `hapusFotoLamaAman()`. Diuji dengan masukan
+  bermusuhan: traversal ke konfigurasi dan berkas kode di luar `uploads/`
+  ditolak dan tercatat ke `error_log`. Tidak diuji lewat login guru karena
+  web guru tidak dipakai lagi; salinan `guru_area/`-nya kemudian dihapus di
+  fase 4.
+- ~~Web guru, API lama, dan perancah di webroot~~ — commit `ea7900f`. Web guru
+  sudah tidak dipakai (tautannya dinonaktifkan, guru mengedit profil lewat
+  aplikasi), tapi berkasnya masih bisa dijalankan lewat URL langsung. Dihapus
+  dari repo dan **dipindah** dari server ke
+  `/DATA/k1807225/arsip-fase4-2026-09-22` — bukan dihapus, supaya bisa
+  dikembalikan. Isinya: seluruh `guru_area/`, `login_guru.php`,
+  `proses_login_guru.php`, delapan berkas `api/` lama (`absen`, `profil`,
+  `riwayat_absensi`, `login_guru`, `logout_guru`, `auth_middleware`,
+  `dashboard`, `laporan_honor`), dan perancah `test_koneksi.php` — yang
+  mencetak nama basis data dan `connect_error` ke siapa pun —
+  `test-manual-api.php`, `admin/test_sesi1.php`, `admin/test_sesi2.php`.
+
+  Dasarnya: tidak ada pemanggil dengan path lengkap di repo ini, dan tidak
+  satu pun versi ClassyncApp dalam seluruh riwayat Git-nya pernah
+  memanggilnya. `.cpanel.yml` ikut diubah karena masih menyalin
+  `guru_area/`. Terverifikasi 22 September 2026: keempat alamat uji menjawab
+  404, `api/get_dashboard_stats.php` tetap 200. `guru_area/index.php`
+  menjawab 301 karena aturan `.htaccess` yang membuang `index.php` — foldernya
+  sendiri sudah tidak ada.
 - ~~`kirim_notifikasi_harian.php` tanpa penjaga dan buta terhadap iOS~~ —
   pengirim terbesar sistem ini: seluruh guru, setiap pagi pukul 07.00. Dulu ia
   bisa dipicu siapa pun lewat URL, mengirim semua token ke FCM sehingga guru
@@ -469,7 +516,8 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 - ~~`api/auth_middleware.php` rekursif~~ — bukan cacat yang perlu diperbaiki,
   melainkan kode mati. Ketujuh pemanggilnya ada di `guru_area/` dan
   `classync/api/`, keduanya sudah digantikan endpoint repo API dengan nama
-  berbeda (`login.php`, `get_honor.php`, `get_profil_guru.php`). Layak dihapus.
+  berbeda (`login.php`, `get_honor.php`, `get_profil_guru.php`). Dihapus di
+  commit `ea7900f` bersama pemanggilnya.
 - ~~Berkas kembar `guru-area`, `loginguru.php`, `guru_area/index2.php`,
   `api/backup/`~~ — dihapus dari repo (commit `f92eac3`) dan dari server,
   bersama `index3.php`, `index-not.php`, `laporan_honor_salah.php`.
@@ -545,12 +593,24 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ## Yang sudah tidak dipakai atau sudah rusak
 
-- `guru_area/` — guru sekarang login lewat ClassyncApp. Jangan masukkan ke
-  daftar uji, tapi **tetap ikutkan dalam perubahan keamanan**: berkasnya masih
-  hidup dan bisa dieksekusi di server.
-- `admin/admin_notifikasi.php` — sama, sudah tidak digunakan.
-- `classync/api/` — hanya `proses_absen_siswa.php` dan
-  `proses_absen_manual.php` yang masih dipanggil panel admin. Sisanya API lama.
+- Web guru — `guru_area/`, `login_guru.php`, dan API lamanya sudah dihapus
+  (`ea7900f`). Sisa yang belum diputuskan: `admin/profil_guru.php`,
+  `admin/edit_profil_guru.php`, dan `admin/proses_edit_profil.php` memakai
+  `$_SESSION['guru_id']` padahal login admin hanya menyetel `admin_id`, jadi
+  menu **Profil Guru** di panel admin kemungkinan sudah rusak. Dan
+  `includes/header.php`, dipakai halaman di akar seperti `absen_piket.php`,
+  masih menautkan ke `login_guru.php` yang kini 404. Berkas mati yang masih
+  ada di server **tetap ikutkan dalam perubahan keamanan** — halaman yang tidak
+  dipakai tetap bisa dijalankan lewat URL langsung.
+- `admin/admin_notifikasi.php` — sudah tidak digunakan.
+- `classync/api/` — yang masih hidup: `get_dashboard_stats.php` dan
+  `proses_absen_siswa.php` dipanggil **ClassyncApp** (`absen-siswa.tsx`);
+  `proses_absen_manual.php`, `get_jadwal_admin.php`,
+  `update_absen_harian.php`, `delete_absen_harian.php`,
+  `ekspor_detail_absensi.php`, `generate_pdf_absensi.php`, dan `db.php`
+  dipanggil panel web. Catatan lama di sini hanya menyebut pemakaian oleh
+  panel admin, dan itu keliru — grep di repo ini tidak akan menemukan
+  pemanggil dari aplikasi.
 - Ekspor Excel di halaman rekap/laporan absensi **rusak sejak sebelum**
   pekerjaan kredensial: `admin/laporan.php:8` memanggil `../vendor/autoload.php`
   sementara PhpSpreadsheet ada di `admin/PhpOffice/`. Bukan regresi.
