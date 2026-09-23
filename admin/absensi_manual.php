@@ -77,7 +77,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_otomatis'])) {
     $status_auto = $_POST['status_otomatis'];
     $keterangan_auto = $_POST['keterangan_otomatis'];
     
-    if (empty($selected_gurus) || empty($tanggal_pilih)) {
+    // Tanggal wajib Y-m-d yang sah. Tanggal tak sah membuat strtotime() false,
+    // getHariIndo() mengembalikan 'Kamis' (1970), dan jadwal Kamis ikut tercatat.
+    $tgl_valid = DateTime::createFromFormat('Y-m-d', (string)$tanggal_pilih);
+    if (empty($selected_gurus) || !$tgl_valid || $tgl_valid->format('Y-m-d') !== $tanggal_pilih) {
         $pesan = "Harap pilih minimal satu guru dan tanggal.";
         $tipe_pesan = "danger";
     } else {
@@ -114,9 +117,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_otomatis'])) {
                 $waktu_fix = $tanggal_pilih . ' ' . $row['jam_mulai'];
 
                 // Cek Duplikasi dulu
-                $cek_dupl = $conn->query("SELECT id FROM absensi WHERE guru_id=$gid AND jadwal_id=$jid AND DATE(waktu_absensi)='$tanggal_pilih'");
-                
-                if ($cek_dupl->num_rows == 0) {
+                $stmt_cek = $conn->prepare("SELECT id FROM absensi WHERE guru_id = ? AND jadwal_id = ? AND DATE(waktu_absensi) = ?");
+                $stmt_cek->bind_param("iis", $gid, $jid, $tanggal_pilih);
+                $stmt_cek->execute();
+                $sudah_ada = $stmt_cek->get_result()->num_rows > 0;
+                $stmt_cek->close();
+
+                if (!$sudah_ada) {
                     $stmt_ins = $conn->prepare("INSERT INTO absensi (guru_id, jadwal_id, tipe_absensi, waktu_absensi, status, keterangan, foto_bukti) VALUES (?, ?, 'mengajar', ?, ?, ?, ?)");
                     $stmt_ins->bind_param("iissss", $gid, $jid, $waktu_fix, $status_auto, $keterangan_auto, $foto_auto_path);
                     if($stmt_ins->execute()) $count_success++;
