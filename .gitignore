@@ -9,6 +9,7 @@
 !/api/uploads/.htaccess
 /cache/
 /phpsessions/
+/graphify-out/
 
 # ── Log & keluaran runtime ──
 error_log
