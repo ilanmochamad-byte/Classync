@@ -303,11 +303,25 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   kegagalan diabaikan dan baris tersimpan tanpa foto. Tutup butir ini setelah
   kedua uji berhasil.
 - **Sedang** — SQL injection di jalur otomatis (massal) `admin/absensi_manual.php`:
+  **diperbaiki, menunggu uji** (commit `3739dd3`). Dulu
   `$conn->query("SELECT id FROM absensi WHERE guru_id=$gid AND jadwal_id=$jid
   AND DATE(waktu_absensi)='$tanggal_pilih'")`, dengan `$gid` dan
-  `$tanggal_pilih` langsung dari formulir. Terbatas pada admin, jadi bobotnya
-  di bawah endpoint tanpa autentikasi, tapi tetap harus jadi prepared
-  statement. Ditemukan saat fase 3 dan sengaja tidak disentuh di sana.
+  `$tanggal_pilih` langsung dari formulir; terbatas pada admin. Kini prepared
+  statement dengan kunci yang sama (`guru_id` + `jadwal_id` + tanggal), dan
+  `tanggal_otomatis` harus `Y-m-d` yang sah sebelum dipakai: tanggal tak sah
+  membuat `getHariIndo()` mengembalikan 'Kamis' (1970), sehingga jadwal Kamis
+  bisa tercatat dengan `waktu_absensi` sampah.
+
+  Uji: dua guru dengan jadwal Aktif tersimpan; kiriman ulang yang sama
+  berakhir "data sudah ada" tanpa baris baru; `tanggal_otomatis` diubah lewat
+  DevTools jadi `2026-09-23' OR '1'='1` ditolak tanpa baris tersimpan. Hapus
+  baris uji sesudahnya — ia ikut terhitung honor. Tutup butir ini setelah
+  ketiganya berhasil.
+
+  Sengaja tidak disentuh: kunci duplikat jalur **satuan** di berkas yang sama
+  menyertakan `tipe_absensi` dan `jadwal_id` untuk semua jenis, sehingga
+  piket kedua di hari yang sama lolos lewat jadwal lain; dan `echo $pesan`
+  tanpa escape, yang bisa memuat `$stmt_insert->error`.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
   percobaan, tanpa token CSRF di form admin.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
@@ -609,14 +623,18 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 ## Yang sudah tidak dipakai atau sudah rusak
 
 - Web guru — `guru_area/`, `login_guru.php`, dan API lamanya sudah dihapus
-  (`ea7900f`). Sisa yang belum diputuskan: `admin/profil_guru.php`,
-  `admin/edit_profil_guru.php`, dan `admin/proses_edit_profil.php` memakai
-  `$_SESSION['guru_id']` padahal login admin hanya menyetel `admin_id`, jadi
-  menu **Profil Guru** di panel admin kemungkinan sudah rusak. Dan
-  `includes/header.php`, dipakai halaman di akar seperti `absen_piket.php`,
-  masih menautkan ke `login_guru.php` yang kini 404. Berkas mati yang masih
-  ada di server **tetap ikutkan dalam perubahan keamanan** — halaman yang tidak
-  dipakai tetap bisa dijalankan lewat URL langsung.
+  (`ea7900f`). Sisanya di panel admin — `admin/profil_guru.php`,
+  `admin/edit_profil_guru.php`, dan `admin/proses_edit_profil.php`, beserta
+  menu **Profil Guru** di navbar — dihapus dari repo di `851213a`. Ketiganya
+  memakai `$_SESSION['guru_id']` padahal login admin hanya menyetel
+  `admin_id`, sehingga bagi admin menu itu selalu menampilkan profil kosong
+  (terverifikasi di produksi 22 September 2026). Karena penyalinan tidak
+  pernah menghapus, ketiga berkas itu harus **dipindah manual** di server ke
+  `/DATA/k1807225/arsip-fase4-2026-09-22`; belum tercatat sudah dilakukan.
+  Tautan ke `login_guru.php` di `includes/header.php` sudah menjadi komentar
+  HTML, jadi tidak lagi tampil. Berkas mati yang masih ada di server **tetap
+  ikutkan dalam perubahan keamanan** — halaman yang tidak dipakai tetap bisa
+  dijalankan lewat URL langsung.
 - `admin/admin_notifikasi.php` — sudah tidak digunakan.
 - `classync/api/` — yang masih hidup: `get_dashboard_stats.php` dan
   `proses_absen_siswa.php` dipanggil **ClassyncApp** (`absen-siswa.tsx`);
