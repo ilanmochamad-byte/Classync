@@ -302,11 +302,17 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   Unggahan yang ditolak kini menghentikan penyimpanan dengan pesan; dulu
   kegagalan diabaikan dan baris tersimpan tanpa foto. Tutup butir ini setelah
   kedua uji berhasil.
-- **Sedang** — kunci duplikat jalur satuan `admin/absensi_manual.php`
-  (`guru_id` + `jadwal_id` + `tipe_absensi` + tanggal) tidak mengikuti tabel
-  "Aturan honor per jenis absensi": untuk piket kuncinya harus `guru_id` +
-  tanggal saja, jadi piket kedua di hari yang sama lolos lewat jadwal lain.
-  Ekskul dan mengajar sudah benar. Bimbingan tidak lewat halaman ini.
+- **Sedang** — kunci duplikat piket di jalur aplikasi
+  `proses_absen_sederhana.php` (repo API) memakai `guru_id` + `jadwal_id` +
+  `tipe_absensi` + tanggal, tidak mengikuti tabel "Aturan honor per jenis
+  absensi". Guru bisa absen piket sesi Pagi lalu Siang di hari yang sama dari
+  `absen_sederhana.tsx`; keduanya masuk `Pending`, dan kalau kepala sekolah
+  menyetujui keduanya lewat `proses_action_piket.php` (`approval_piket.tsx`),
+  honornya terbayar dua kali — `proses_action_piket.php` hanya mengubah
+  status, tanpa pemeriksaan apa pun. Cacat yang sama di input satuan panel
+  web sudah ditutup (lihat "Sudah ditutup"). Perbaikannya harus
+  mempertahankan bentuk penolakan yang sudah ada — HTTP 409 lewat
+  `Exception` — karena aplikasi versi lama membacanya.
 - **Rendah** — `echo $pesan` tanpa escape di `admin/absensi_manual.php`;
   pesannya bisa memuat `$stmt_insert->error`. Terbatas pada admin.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
@@ -330,6 +336,21 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Kunci duplikat piket di input satuan `admin/absensi_manual.php`~~ —
+  commit `a88367a`. Input satuan memakai `guru_id` + `jadwal_id` +
+  `tipe_absensi` + tanggal untuk semua jenis, sehingga piket kedua di hari
+  yang sama lolos lewat jadwal sesi lain. Piket kini dicek per guru per
+  tanggal tanpa `jadwal_id`, sama dengan `approval_absensi.php`; mengajar dan
+  ekskul tetap per jadwal. Pemeriksaannya tidak memandang `status`, juga
+  sama dengan jalur approval: baris piket `Ditolak` atau `Pending` ikut
+  menghalangi input manual di tanggal itu. Terverifikasi di produksi
+  24 September 2026: piket sesi kedua ditolak dengan pesan piket, dan dua
+  jadwal ekskul berbeda di tanggal yang sama tetap tersimpan.
+
+  Sengaja tidak disentuh, dan masih terbuka: server tidak memeriksa bahwa
+  `jadwal_id` kiriman milik guru itu, berstatus `Aktif`, dan harinya cocok
+  dengan tanggal — saringan Aktif hanya ada di dropdown
+  `api/get_jadwal_admin.php`.
 - ~~SQL injection di jalur massal `admin/absensi_manual.php`~~ — commit
   `3739dd3`. Pengecekan duplikat menempelkan `guru_ids[]` dan
   `tanggal_otomatis` dari formulir langsung ke teks SQL; kini prepared
@@ -340,10 +361,9 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   24 September 2026: kiriman sah tersimpan, kiriman ulang ditolak sebagai
   duplikat, dan tanggal yang disisipi SQL ditolak tanpa baris tersimpan.
 
-  Sengaja tidak disentuh, dan masih terbuka: kunci duplikat jalur **satuan**
-  di berkas yang sama menyertakan `tipe_absensi` dan `jadwal_id` untuk semua
-  jenis, sehingga piket kedua di hari yang sama lolos lewat jadwal lain; dan
-  `echo $pesan` tanpa escape, yang bisa memuat `$stmt_insert->error`.
+  Sengaja tidak disentuh: kunci duplikat piket di jalur **satuan** berkas yang
+  sama — kemudian ditutup di `a88367a`; dan `echo $pesan` tanpa escape, yang
+  bisa memuat `$stmt_insert->error` — masih terbuka.
 - ~~Tidak ada batas ukuran berkas unggahan~~ — dua lapis, keduanya kini
   terpasang. Dulu `upload_max_filesize` dan `post_max_size` 100M di kedua situs,
   `getimagesize()` hanya membaca header, dan endpoint API tanpa autentikasi —
