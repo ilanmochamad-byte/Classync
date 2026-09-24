@@ -331,7 +331,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_otomatis'])) {
 
                     <div class="mb-3">
                         <label for="foto_bukti_otomatis" class="form-label">Bukti Pendukung (Surat Edaran/Foto)</label>
-                        <input type="file" name="foto_bukti_otomatis" id="foto_bukti_otomatis" class="form-control" accept="image/*,application/pdf">
+                        <input type="file" name="foto_bukti_otomatis" id="foto_bukti_otomatis" class="form-control" accept="image/*">
                     </div>
 
                     <div class="text-end">
