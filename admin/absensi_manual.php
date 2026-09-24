@@ -28,6 +28,44 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
     $keterangan = $_POST['keterangan'];
     $foto_bukti_path = null;
 
+    // Jadwal harus Aktif, milik guru ini, dan harinya cocok dengan tanggal —
+    // sama dengan approval_absensi.php dan jalur massal di bawah. Dulu hanya
+    // dropdown yang menyaring, jadi nilai kiriman tidak pernah diperiksa.
+    // Tabel diambil dari peta tetap, bukan dari formulir.
+    $peta_tabel = ['mengajar' => 'jadwal_mengajar', 'piket' => 'jadwal_piket', 'ekskul' => 'jadwal_ekskul'];
+    $guru_id   = (int)$guru_id;
+    $jadwal_id = (int)$jadwal_id;
+    // Format datetime-local, dengan atau tanpa detik. Dicocokkan bolak-balik:
+    // createFromFormat() menerima luapan (30 Februari jadi 2 Maret).
+    $dt = null;
+    foreach (['Y-m-d\TH:i', 'Y-m-d\TH:i:s'] as $format_waktu) {
+        $calon = DateTime::createFromFormat($format_waktu, (string)$waktu_absensi);
+        if ($calon && $calon->format($format_waktu) === $waktu_absensi) {
+            $dt = $calon;
+            break;
+        }
+    }
+    $galat_jadwal = null;
+    if (!isset($peta_tabel[$tipe_absensi]) || !$dt) {
+        $galat_jadwal = "Error: Tipe jadwal atau waktu absensi tidak sah.";
+    } else {
+        $hari_absen = getHariIndo($dt->format('Y-m-d'));
+        $tabel = $peta_tabel[$tipe_absensi];
+        $stmt_j = $conn->prepare("SELECT id FROM $tabel WHERE id = ? AND guru_id = ? AND hari = ? AND status_jadwal = 'Aktif'");
+        $stmt_j->bind_param("iis", $jadwal_id, $guru_id, $hari_absen);
+        $stmt_j->execute();
+        if ($stmt_j->get_result()->num_rows === 0) {
+            $galat_jadwal = "Error: Jadwal yang dipilih bukan jadwal Aktif milik guru ini pada hari $hari_absen. "
+                          . "Absensi manual hanya bisa dicatat untuk jadwal yang berlaku di hari tanggal tersebut.";
+        }
+        $stmt_j->close();
+    }
+
+    if ($galat_jadwal !== null) {
+        $pesan = $galat_jadwal;
+        $tipe_pesan = "danger";
+    } else {
+
     // Cek duplikasi. Kuncinya berbeda per jenis, sama dengan approval_absensi.php:
     //   piket  — satu hari satu bayar. Label sesi Pagi/Siang tidak menentukan
     //            waktu, jadi jadwal_id TIDAK dipakai.
@@ -78,6 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
         }
         } // akhir: foto diterima atau tidak diunggah
     }
+    } // akhir: jadwal sah
 }
 
 // --- PROSES 2: SIMPAN ABSENSI OTOMATIS (MASSAL/LIBUR) ---
