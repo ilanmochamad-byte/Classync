@@ -629,9 +629,10 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   menu **Profil Guru** di navbar — dihapus dari repo di `851213a`. Ketiganya
   memakai `$_SESSION['guru_id']` padahal login admin hanya menyetel
   `admin_id`, sehingga bagi admin menu itu selalu menampilkan profil kosong
-  (terverifikasi di produksi 22 September 2026). Karena penyalinan tidak
-  pernah menghapus, ketiga berkas itu harus **dipindah manual** di server ke
-  `/DATA/k1807225/arsip-fase4-2026-09-22`; belum tercatat sudah dilakukan.
+  (terverifikasi di produksi 22 September 2026). Ketiga berkas itu juga sudah
+  dipindah dari server ke arsip fase 4 yang sama. Terverifikasi 24 September
+  2026: ketiganya menjawab 404, sedangkan `admin/dashboard.php` sebagai
+  pembanding tetap 302 ke login.
   Tautan ke `login_guru.php` di `includes/header.php` sudah menjadi komentar
   HTML, jadi tidak lagi tampil. Berkas mati yang masih ada di server **tetap
   ikutkan dalam perubahan keamanan** — halaman yang tidak dipakai tetap bisa
