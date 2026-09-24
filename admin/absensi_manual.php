@@ -164,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_otomatis'])) {
 
 <?php if(!empty($pesan)): ?>
     <div class="alert alert-<?php echo $tipe_pesan; ?> alert-dismissible fade show" role="alert">
-        <?php echo $pesan; ?>
+        <?php echo htmlspecialchars($pesan, ENT_QUOTES, 'UTF-8'); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 <?php endif; ?>
