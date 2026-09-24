@@ -302,8 +302,16 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   Unggahan yang ditolak kini menghentikan penyimpanan dengan pesan; dulu
   kegagalan diabaikan dan baris tersimpan tanpa foto. Tutup butir ini setelah
   kedua uji berhasil.
-- **Rendah** — `echo $pesan` tanpa escape di `admin/absensi_manual.php`;
-  pesannya bisa memuat `$stmt_insert->error`. Terbatas pada admin.
+- **Rendah** — cabang galat `->error` setelah `execute()` di panel admin
+  kemungkinan tidak pernah tercapai. classync berjalan di `alt-php83`, dan
+  sejak PHP 8.1 bawaan `mysqli_report` adalah `ERROR | STRICT`;
+  `includes/db.php` dan `admin/partials/header.php` tidak mengubahnya.
+  Akibatnya `INSERT` yang gagal melempar `mysqli_sql_exception` yang tidak
+  tertangkap, dan admin melihat halaman kosong atau 500 — bukan pesan
+  "Gagal menyimpan: …" yang ditulis kodenya. Tidak ada data yang salah
+  tersimpan; yang hilang pesan galatnya. **Dugaan dari kode, belum diuji**,
+  dan belum disapu ke halaman admin lain. Ditemukan di
+  `admin/absensi_manual.php:76`.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
   percobaan, tanpa token CSRF di form admin.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
@@ -325,6 +333,16 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~`echo $pesan` tanpa escape di `admin/absensi_manual.php`~~ — commit
+  `4a0dbdb`. Pertahanan berlapis, bukan penutup lubang yang terbuka: sejak
+  validasi tanggal di `3739dd3`, kesepuluh tempat yang mengisi `$pesan`
+  hanya memuat literal, bilangan, tanggal `Y-m-d`, nama hari dari peta tetap,
+  dan pesan tetap `includes/unggah_gambar.php`. Kini
+  `htmlspecialchars($pesan, ENT_QUOTES, 'UTF-8')`, supaya pesan yang kelak
+  memuat nama guru atau isi formulir tetap aman. Terverifikasi di produksi
+  24 September 2026: pesan sukses dan pesan duplikat tampil tanpa entitas
+  yang terlihat. `$tipe_pesan` di atribut `class` sengaja tidak di-escape:
+  nilainya hanya salah satu dari tiga literal.
 - ~~Kunci duplikat piket di jalur aplikasi `proses_absen_sederhana.php`~~ —
   commit `1e0194f`, repo API. Pengecekan absen ganda memakai `guru_id` +
   `jadwal_id` + `tipe_absensi` + tanggal untuk piket dan ekskul, sehingga
@@ -377,8 +395,8 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   duplikat, dan tanggal yang disisipi SQL ditolak tanpa baris tersimpan.
 
   Sengaja tidak disentuh: kunci duplikat piket di jalur **satuan** berkas yang
-  sama — kemudian ditutup di `a88367a`; dan `echo $pesan` tanpa escape, yang
-  bisa memuat `$stmt_insert->error` — masih terbuka.
+  sama — kemudian ditutup di `a88367a`; dan `echo $pesan` tanpa escape —
+  kemudian ditutup di `4a0dbdb`.
 - ~~Tidak ada batas ukuran berkas unggahan~~ — dua lapis, keduanya kini
   terpasang. Dulu `upload_max_filesize` dan `post_max_size` 100M di kedua situs,
   `getimagesize()` hanya membaca header, dan endpoint API tanpa autentikasi —
