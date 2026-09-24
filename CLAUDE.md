@@ -333,6 +333,30 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Input satuan `admin/absensi_manual.php` tidak memeriksa jadwal di sisi
+  server~~ — commit `2325e0a`. `guru_id`, `jadwal_id`, `tipe_absensi`, dan
+  `waktu_absensi` disimpan langsung dari formulir; saringan
+  `status_jadwal = 'Aktif'` hanya ada di dropdown. Jadwal guru lain, jadwal
+  non-Aktif, atau jadwal Senin pada tanggal Selasa bisa tercatat dan dibayar.
+  Kini jadwal harus Aktif, milik guru itu, dan harinya cocok dengan tanggal —
+  sama dengan `approval_absensi.php` dan jalur massal. Tukar hari sengaja
+  ditolak, konsisten dengan jalur approval. Jam tidak dicocokkan: admin
+  memilih jadwalnya langsung, jadi jam tidak dibutuhkan untuk mencarinya.
+  Nama tabel diambil dari peta tetap, bukan dari formulir.
+
+  `waktu_absensi` harus `datetime-local` yang sah, dan dicocokkan
+  **bolak-balik**: `DateTime::createFromFormat()` menerima luapan —
+  30 Februari jadi 2 Maret, jam 25 jadi 01.00 esok hari — dan tanpa
+  pencocokan itu hari jadwal dihitung dari tanggal hasil luapan. Celah ini
+  ada di rencana awal dan baru terlihat saat diuji lokal.
+
+  Terverifikasi di produksi 25 September 2026: mengajar, piket, dan ekskul
+  dengan jadwal sah tersimpan; jadwal dengan hari yang tidak cocok, jadwal
+  guru lain, dan jadwal non-Aktif ditolak.
+
+  Sengaja tidak disentuh: `status` dan `keterangan` belum divalidasi (nilai
+  `status` di luar dropdown tidak dibayar `hitungHonorBulan()`), dropdown
+  belum disaring menurut tanggal, dan belum ada transaksi.
 - ~~`echo $pesan` tanpa escape di `admin/absensi_manual.php`~~ — commit
   `4a0dbdb`. Pertahanan berlapis, bukan penutup lubang yang terbuka: sejak
   validasi tanggal di `3739dd3`, kesepuluh tempat yang mengisi `$pesan`
@@ -380,10 +404,9 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   24 September 2026: piket sesi kedua ditolak dengan pesan piket, dan dua
   jadwal ekskul berbeda di tanggal yang sama tetap tersimpan.
 
-  Sengaja tidak disentuh, dan masih terbuka: server tidak memeriksa bahwa
-  `jadwal_id` kiriman milik guru itu, berstatus `Aktif`, dan harinya cocok
-  dengan tanggal — saringan Aktif hanya ada di dropdown
-  `api/get_jadwal_admin.php`.
+  Sengaja tidak disentuh: server tidak memeriksa bahwa `jadwal_id` kiriman
+  milik guru itu, berstatus `Aktif`, dan harinya cocok dengan tanggal —
+  kemudian ditutup di `2325e0a`.
 - ~~SQL injection di jalur massal `admin/absensi_manual.php`~~ — commit
   `3739dd3`. Pengecekan duplikat menempelkan `guru_ids[]` dan
   `tanggal_otomatis` dari formulir langsung ke teks SQL; kini prepared
