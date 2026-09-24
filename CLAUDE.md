@@ -302,26 +302,13 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   Unggahan yang ditolak kini menghentikan penyimpanan dengan pesan; dulu
   kegagalan diabaikan dan baris tersimpan tanpa foto. Tutup butir ini setelah
   kedua uji berhasil.
-- **Sedang** — SQL injection di jalur otomatis (massal) `admin/absensi_manual.php`:
-  **diperbaiki, menunggu uji** (commit `3739dd3`). Dulu
-  `$conn->query("SELECT id FROM absensi WHERE guru_id=$gid AND jadwal_id=$jid
-  AND DATE(waktu_absensi)='$tanggal_pilih'")`, dengan `$gid` dan
-  `$tanggal_pilih` langsung dari formulir; terbatas pada admin. Kini prepared
-  statement dengan kunci yang sama (`guru_id` + `jadwal_id` + tanggal), dan
-  `tanggal_otomatis` harus `Y-m-d` yang sah sebelum dipakai: tanggal tak sah
-  membuat `getHariIndo()` mengembalikan 'Kamis' (1970), sehingga jadwal Kamis
-  bisa tercatat dengan `waktu_absensi` sampah.
-
-  Uji: dua guru dengan jadwal Aktif tersimpan; kiriman ulang yang sama
-  berakhir "data sudah ada" tanpa baris baru; `tanggal_otomatis` diubah lewat
-  DevTools jadi `2026-09-23' OR '1'='1` ditolak tanpa baris tersimpan. Hapus
-  baris uji sesudahnya — ia ikut terhitung honor. Tutup butir ini setelah
-  ketiganya berhasil.
-
-  Sengaja tidak disentuh: kunci duplikat jalur **satuan** di berkas yang sama
-  menyertakan `tipe_absensi` dan `jadwal_id` untuk semua jenis, sehingga
-  piket kedua di hari yang sama lolos lewat jadwal lain; dan `echo $pesan`
-  tanpa escape, yang bisa memuat `$stmt_insert->error`.
+- **Sedang** — kunci duplikat jalur satuan `admin/absensi_manual.php`
+  (`guru_id` + `jadwal_id` + `tipe_absensi` + tanggal) tidak mengikuti tabel
+  "Aturan honor per jenis absensi": untuk piket kuncinya harus `guru_id` +
+  tanggal saja, jadi piket kedua di hari yang sama lolos lewat jadwal lain.
+  Ekskul dan mengajar sudah benar. Bimbingan tidak lewat halaman ini.
+- **Rendah** — `echo $pesan` tanpa escape di `admin/absensi_manual.php`;
+  pesannya bisa memuat `$stmt_insert->error`. Terbatas pada admin.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
   percobaan, tanpa token CSRF di form admin.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
@@ -343,6 +330,20 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~SQL injection di jalur massal `admin/absensi_manual.php`~~ — commit
+  `3739dd3`. Pengecekan duplikat menempelkan `guru_ids[]` dan
+  `tanggal_otomatis` dari formulir langsung ke teks SQL; kini prepared
+  statement dengan kunci yang sama (`guru_id` + `jadwal_id` + tanggal).
+  `tanggal_otomatis` juga harus `Y-m-d` yang sah sebelum dipakai: tanggal tak
+  sah membuat `getHariIndo()` mengembalikan 'Kamis' (1970), sehingga jadwal
+  Kamis bisa tercatat dengan `waktu_absensi` sampah. Terverifikasi di produksi
+  24 September 2026: kiriman sah tersimpan, kiriman ulang ditolak sebagai
+  duplikat, dan tanggal yang disisipi SQL ditolak tanpa baris tersimpan.
+
+  Sengaja tidak disentuh, dan masih terbuka: kunci duplikat jalur **satuan**
+  di berkas yang sama menyertakan `tipe_absensi` dan `jadwal_id` untuk semua
+  jenis, sehingga piket kedua di hari yang sama lolos lewat jadwal lain; dan
+  `echo $pesan` tanpa escape, yang bisa memuat `$stmt_insert->error`.
 - ~~Tidak ada batas ukuran berkas unggahan~~ — dua lapis, keduanya kini
   terpasang. Dulu `upload_max_filesize` dan `post_max_size` 100M di kedua situs,
   `getimagesize()` hanya membaca header, dan endpoint API tanpa autentikasi —
