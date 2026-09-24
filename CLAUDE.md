@@ -302,17 +302,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   Unggahan yang ditolak kini menghentikan penyimpanan dengan pesan; dulu
   kegagalan diabaikan dan baris tersimpan tanpa foto. Tutup butir ini setelah
   kedua uji berhasil.
-- **Sedang** — kunci duplikat piket di jalur aplikasi
-  `proses_absen_sederhana.php` (repo API) memakai `guru_id` + `jadwal_id` +
-  `tipe_absensi` + tanggal, tidak mengikuti tabel "Aturan honor per jenis
-  absensi". Guru bisa absen piket sesi Pagi lalu Siang di hari yang sama dari
-  `absen_sederhana.tsx`; keduanya masuk `Pending`, dan kalau kepala sekolah
-  menyetujui keduanya lewat `proses_action_piket.php` (`approval_piket.tsx`),
-  honornya terbayar dua kali — `proses_action_piket.php` hanya mengubah
-  status, tanpa pemeriksaan apa pun. Cacat yang sama di input satuan panel
-  web sudah ditutup (lihat "Sudah ditutup"). Perbaikannya harus
-  mempertahankan bentuk penolakan yang sudah ada — HTTP 409 lewat
-  `Exception` — karena aplikasi versi lama membacanya.
 - **Rendah** — `echo $pesan` tanpa escape di `admin/absensi_manual.php`;
   pesannya bisa memuat `$stmt_insert->error`. Terbatas pada admin.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
@@ -336,6 +325,32 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Kunci duplikat piket di jalur aplikasi `proses_absen_sederhana.php`~~ —
+  commit `1e0194f`, repo API. Pengecekan absen ganda memakai `guru_id` +
+  `jadwal_id` + `tipe_absensi` + tanggal untuk piket dan ekskul, sehingga
+  guru bisa absen piket sesi Pagi lalu Siang di hari yang sama dari
+  `absen_sederhana.tsx`; keduanya masuk `Pending`, dan kalau kepala sekolah
+  menyetujui keduanya lewat `proses_action_piket.php`, honornya terbayar dua
+  kali. Piket kini dicek per guru per hari tanpa `jadwal_id` dan tanpa
+  memandang `status` — piket `Ditolak` ikut menghalangi absen ulang lewat
+  sesi lain, sengaja disamakan dengan panel web dan jalur approval. Ekskul
+  tetap per jadwal. Penolakan tetap HTTP 409 dengan bentuk `{error,
+  message}`; `absen_sederhana.tsx` hanya membaca `message`, jadi versi lama
+  langsung menampilkan pesan barunya tanpa rilis. Terverifikasi di produksi
+  24 September 2026: piket sesi kedua ditolak dengan pesan piket, dan absen
+  ekskul tetap tersimpan.
+
+  Dengan ini keempat jalur yang menulis piket ke `absensi` memakai kunci yang
+  sama: input satuan panel web, approval panel web, approval repo API, dan
+  absen langsung dari aplikasi.
+
+  Sengaja tidak disentuh: `proses_action_piket.php` mengubah status tanpa
+  pemeriksaan apa pun. Saat butir ini ditutup, itu tidak lagi berbahaya:
+  sensus 24 September 2026 atas seluruh `absensi` menemukan satu pasangan
+  piket ganda dan nol pasangan `Pending`. Pasangan itu guru 12, 7 Maret 2026,
+  baris 1977 dan 2227, keduanya `Hadir`. Kemungkinan besar honor Maret
+  terbayar dua kali. Seperti baris ganda guru 4 pada Juli, keputusannya ada
+  di bendahara, bukan keputusan teknis.
 - ~~Kunci duplikat piket di input satuan `admin/absensi_manual.php`~~ —
   commit `a88367a`. Input satuan memakai `guru_id` + `jadwal_id` +
   `tipe_absensi` + tanggal untuk semua jenis, sehingga piket kedua di hari
