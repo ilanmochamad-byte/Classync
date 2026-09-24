@@ -28,15 +28,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
     $keterangan = $_POST['keterangan'];
     $foto_bukti_path = null;
 
-    // Cek duplikasi
+    // Cek duplikasi. Kuncinya berbeda per jenis, sama dengan approval_absensi.php:
+    //   piket  — satu hari satu bayar. Label sesi Pagi/Siang tidak menentukan
+    //            waktu, jadi jadwal_id TIDAK dipakai.
+    //   lainnya — per jadwal per tanggal.
     $tgl_absen = date('Y-m-d', strtotime($waktu_absensi));
-    $sql_cek = "SELECT id FROM absensi WHERE guru_id = ? AND jadwal_id = ? AND tipe_absensi = ? AND DATE(waktu_absensi) = ?";
-    $stmt_cek = $conn->prepare($sql_cek);
-    $stmt_cek->bind_param("iiss", $guru_id, $jadwal_id, $tipe_absensi, $tgl_absen);
+    if ($tipe_absensi === 'piket') {
+        $stmt_cek = $conn->prepare("SELECT id FROM absensi WHERE guru_id = ? AND tipe_absensi = 'piket' AND DATE(waktu_absensi) = ?");
+        $stmt_cek->bind_param("is", $guru_id, $tgl_absen);
+    } else {
+        $sql_cek = "SELECT id FROM absensi WHERE guru_id = ? AND jadwal_id = ? AND tipe_absensi = ? AND DATE(waktu_absensi) = ?";
+        $stmt_cek = $conn->prepare($sql_cek);
+        $stmt_cek->bind_param("iiss", $guru_id, $jadwal_id, $tipe_absensi, $tgl_absen);
+    }
     $stmt_cek->execute();
-    
+
     if ($stmt_cek->get_result()->num_rows > 0) {
-        $pesan = "Error: Guru ini sudah memiliki catatan absensi untuk jadwal dan tanggal tersebut.";
+        $pesan = ($tipe_absensi === 'piket')
+            ? "Error: Guru ini sudah memiliki catatan absensi piket pada tanggal tersebut. Piket dibayar satu kali per hari, apa pun sesinya."
+            : "Error: Guru ini sudah memiliki catatan absensi untuk jadwal dan tanggal tersebut.";
         $tipe_pesan = "danger";
     } else {
         // Upload Foto — opsional. Kalau diunggah tapi ditolak, absensinya
