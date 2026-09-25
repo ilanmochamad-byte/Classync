@@ -282,26 +282,6 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   (Expo) dan guru 22 (kosong) akan ikut begitu mereka membuka 2.9.2; periksa
   bentuk `push_token` mereka di tabel `guru` — cara membedakannya ada di
   bagian "Notifikasi" di atas.
-- **Sedang** — jalur unggah repo ini: **menunggu uji** untuk dua fase.
-  Pekerjaan empat fase (September 2026) memindahkan semua unggahan ke penolong
-  bersama `includes/unggah_gambar.php`: ekstensi dari tipe yang terdeteksi
-  `getimagesize()`, nama kiriman tidak masuk ke nama berkas, batas 8 MB, dan
-  `hapusFotoLamaAman()` yang dipagari `realpath()` ke dalam `uploads/`.
-  Fase 1 dan 4 sudah ditutup (lihat "Sudah ditutup"). Yang **belum diuji**:
-
-  - Fase 2, `absensi_pkl.php` (commit `2569f6f`) — dipakai siswa PKL. Dulu
-    ekstensi diambil dari nama kiriman tanpa daftar putih, sehingga polyglot
-    `x.php` tersimpan sebagai `.php`. Uji: satu absen PKL sungguhan, lalu
-    klik thumbnail di riwayat — modalnya harus terbuka.
-  - Fase 3, `admin/siswa.php` dan kedua jalur `admin/absensi_manual.php`
-    (commit `9c10504`). `siswa.php` juga memakai `$_POST['foto_lama']` mentah
-    untuk `unlink()` — lubang yang sama dengan fase 1, di sini terbatas pada
-    admin. Uji: ganti foto siswa, simpan absensi manual dengan foto, dan
-    pastikan berkas bukan gambar ditolak tanpa menyimpan baris.
-
-  Unggahan yang ditolak kini menghentikan penyimpanan dengan pesan; dulu
-  kegagalan diabaikan dan baris tersimpan tanpa foto. Tutup butir ini setelah
-  kedua uji berhasil.
 - **Rendah** — cabang galat `->error` setelah `execute()` di panel admin
   kemungkinan tidak pernah tercapai. classync berjalan di `alt-php83`, dan
   sejak PHP 8.1 bawaan `mysqli_report` adalah `ERROR | STRICT`;
@@ -333,6 +313,28 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Jalur unggah repo ini, fase 2 dan 3~~ — commit `2569f6f` (fase 2,
+  `absensi_pkl.php`) dan `9c10504` (fase 3, `admin/siswa.php` dan kedua
+  jalur `admin/absensi_manual.php`). Menutup pekerjaan empat fase yang
+  memindahkan semua unggahan ke `includes/unggah_gambar.php`: ekstensi dari
+  tipe yang terdeteksi `getimagesize()`, nama kiriman tidak masuk ke nama
+  berkas, batas 8 MB, dan `hapusFotoLamaAman()` yang dipagari `realpath()`
+  ke dalam `uploads/`. Fase 1 dan 4 sudah ditutup lebih dulu.
+
+  Terverifikasi di produksi 25 September 2026: absen PKL tersimpan dan modal
+  thumbnail-nya terbuka; ganti foto siswa tersimpan dan tampil; absensi
+  manual dengan foto asli tersimpan dengan pola nama baru; berkas teks
+  berekstensi `.jpg` ditolak dengan "Foto harus berupa gambar…" tanpa baris
+  tersimpan. Atribut `accept="image/*"` di formulir **bukan** lapis
+  pengaman — ia hanya menyaring pemilih berkas peramban, dan uji penolakan
+  harus memakai berkas yang lolos saringan itu.
+
+  Satu sisa fase 3 ikut dibereskan di `24ed697`: kolom foto jalur massal
+  menawarkan `application/pdf`, padahal sejak `9c10504` server menolak
+  apa pun selain gambar, sehingga admin yang memilih PDF kehilangan seluruh
+  absensi massalnya. Pencarian `auto-*.pdf` di `uploads/` tidak menemukan
+  satu pun, jadi PDF tidak pernah dipakai di jalur itu; `accept` cukup
+  disamakan dengan input satuan.
 - ~~Input satuan `admin/absensi_manual.php` tidak memeriksa jadwal di sisi
   server~~ — commit `2325e0a`. `guru_id`, `jadwal_id`, `tipe_absensi`, dan
   `waktu_absensi` disimpan langsung dari formulir; saringan
@@ -619,6 +621,11 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   Isinya diarsipkan di repo, tapi `.cpanel.yml` tidak menyalin `uploads/` —
   salinan server diurus manual. Blok `(?i)` untuk log/dump di `.htaccess` akar
   kedua situs juga hanya ada di server.
+
+  Berkas uji `probe.php` dari verifikasi 14 September sempat tertinggal di
+  `uploads/` — terblokir (403), tapi tetap sisa uji. Dipindah ke arsip fase 4
+  pada 25 September 2026; kini 404. Setelah menguji dengan berkas probe,
+  pindahkan berkasnya hari itu juga.
 - ~~`api/auth_middleware.php` rekursif~~ — bukan cacat yang perlu diperbaiki,
   melainkan kode mati. Ketujuh pemanggilnya ada di `guru_area/` dan
   `classync/api/`, keduanya sudah digantikan endpoint repo API dengan nama
