@@ -255,7 +255,10 @@ try {
 
         $foto_path = null;
         if ($foto_base64) $foto_path = $savePhoto($foto_base64, 'pulang');
-        $stmt_up = $conn->prepare("UPDATE absensi_siswa SET waktu_pulang = ?, foto_pulang = ? WHERE id = ?");
+        // Absen pulang yang baru datang setelah cron sore berjalan (misalnya
+        // siswa ekskul) langsung membetulkan golongannya, tanpa menunggu
+        // Hitung ulang. Golongan lain, termasuk izin pulang, tidak disentuh.
+        $stmt_up = $conn->prepare("UPDATE absensi_siswa SET waktu_pulang = ?, foto_pulang = ?, status_harian = IF(status_harian = 'Pulang Lebih Awal', 'Hadir', status_harian) WHERE id = ?");
         if (!$stmt_up) throw new Exception('Prepare update pulang failed: ' . $conn->error);
         $stmt_up->bind_param('ssi', $waktu_now, $foto_path, $row['id']);
         if (!$stmt_up->execute()) throw new Exception('Execute update pulang failed: ' . $stmt_up->error);
