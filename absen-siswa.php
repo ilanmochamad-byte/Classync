@@ -6,6 +6,14 @@ require_once 'includes/kalender_sekolah.php';
 // infoHariSekolah(), bukan dari kunci jam_pulang saja.
 $hari_ini = infoHariSekolah($conn);
 
+// Mulai jam pulang hari ini, mode PULANG terpilih sejak halaman dimuat.
+// Halaman ini dimuat ulang setelah setiap scan berhasil, dan dulu pilihannya
+// selalu kembali ke MASUK: siswa yang lupa menekan PULANG ditolak "sudah
+// absen masuk". Hitungannya memakai jam server, bukan jam PC kiosk. Hari
+// tanpa sekolah tidak punya jam pulang, jadi tetap MASUK.
+$detik_ke_pulang  = $hari_ini['jam_pulang'] !== null ? strtotime(date('Y-m-d') . ' ' . $hari_ini['jam_pulang']) - time() : null;
+$mode_awal_pulang = $detik_ke_pulang !== null && $detik_ke_pulang <= 0;
+
 $pengaturan_query = $conn->query("SELECT nama_pengaturan, nilai_pengaturan FROM pengaturan WHERE nama_pengaturan IN ('jam_masuk','jam_pulang')");
 $pengaturan = [];
 while ($r = $pengaturan_query->fetch_assoc()) {
@@ -417,9 +425,9 @@ body::before {
                 </div>
             <?php endif; ?>
             <div class="mode-toggle">
-                <input type="radio" name="mode_absen" id="mode_masuk" checked>
+                <input type="radio" name="mode_absen" id="mode_masuk" <?php echo $mode_awal_pulang ? '' : 'checked'; ?>>
                 <label for="mode_masuk">🚪 MASUK</label>
-                <input type="radio" name="mode_absen" id="mode_pulang">
+                <input type="radio" name="mode_absen" id="mode_pulang" <?php echo $mode_awal_pulang ? 'checked' : ''; ?>>
                 <label for="mode_pulang">🏠 PULANG</label>
             </div>
             <form id="absen-form">
@@ -525,6 +533,13 @@ document.addEventListener('DOMContentLoaded', function () {
         if(cd) cd.textContent=n.toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
     }
     setInterval(tick,1000); tick();
+
+    // Pindah sendiri ke PULANG tepat pada jam pulang, kalau halaman ini sedang
+    // terbuka tanpa dimuat ulang. Selisihnya dihitung server.
+    const detikKePulang = <?php echo $detik_ke_pulang !== null && $detik_ke_pulang > 0 ? (int)$detik_ke_pulang : 'null'; ?>;
+    if (detikKePulang !== null) {
+        setTimeout(()=>{ document.getElementById('mode_pulang').checked = true; }, detikKePulang * 1000);
+    }
 
     setTimeout(()=>{ document.querySelectorAll('.progress-fill').forEach(b=>{ b.style.width=b.dataset.width; }); },400);
 
