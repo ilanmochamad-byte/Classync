@@ -1,5 +1,10 @@
 <?php
 require 'includes/db.php';
+require_once 'includes/kalender_sekolah.php';
+
+// Jenis hari dan jam pulang hari ini. Jumat, Pulang Cepat, dan Libur dihitung
+// infoHariSekolah(), bukan dari kunci jam_pulang saja.
+$hari_ini = infoHariSekolah($conn);
 
 $pengaturan_query = $conn->query("SELECT nama_pengaturan, nilai_pengaturan FROM pengaturan WHERE nama_pengaturan IN ('jam_masuk','jam_pulang')");
 $pengaturan = [];
@@ -393,7 +398,7 @@ body::before {
     <div class="schedule-box">
         <div class="schedule-box-title"><i class="bi bi-clock-fill"></i> Waktu Operasional</div>
         <div class="sched-row"><div class="sched-label"><i class="bi bi-door-open"></i> Masuk</div><div class="sched-time"><?php echo htmlspecialchars(date('H:i',strtotime($jam_masuk)) ?? ''); ?></div></div>
-        <div class="sched-row"><div class="sched-label"><i class="bi bi-door-closed"></i> Pulang</div><div class="sched-time"><?php echo htmlspecialchars(date('H:i',strtotime($jam_pulang)) ?? ''); ?></div></div>
+        <div class="sched-row"><div class="sched-label"><i class="bi bi-door-closed"></i> Pulang</div><div class="sched-time"><?php echo $hari_ini['jam_pulang'] !== null ? date('H:i', strtotime($hari_ini['jam_pulang'])) : '—'; ?></div></div>
     </div>
 </aside>
 
@@ -402,6 +407,15 @@ body::before {
     <div class="ah-card form-card">
         <div class="ah-card-body">
             <div class="ah-card-title"><i class="bi bi-qr-code-scan"></i> Absensi Siswa</div>
+            <?php if ($hari_ini['jenis'] === 'Libur' || $hari_ini['jenis'] === 'Pulang Cepat'): ?>
+                <div class="alert alert-warning py-1 px-2 mb-2 small">
+                    <?php if ($hari_ini['jenis'] === 'Libur'): ?>
+                        <i class="bi bi-calendar-x"></i> Hari ini libur: <?php echo htmlspecialchars($hari_ini['keterangan'], ENT_QUOTES, 'UTF-8'); ?>.
+                    <?php else: ?>
+                        <i class="bi bi-clock-history"></i> Hari ini pulang pukul <?php echo date('H.i', strtotime($hari_ini['jam_pulang'])); ?> — <?php echo htmlspecialchars($hari_ini['keterangan'], ENT_QUOTES, 'UTF-8'); ?>.
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
             <div class="mode-toggle">
                 <input type="radio" name="mode_absen" id="mode_masuk" checked>
                 <label for="mode_masuk">🚪 MASUK</label>
