@@ -35,6 +35,8 @@ if (!file_exists(__DIR__ . '/../includes/db.php')) {
     jsonResponse('error', 'Server configuration error (db).');
 }
 require __DIR__ . '/../includes/db.php';
+// Jam pulang hari ini (Jumat, Pulang Cepat, Libur) dari satu sumber.
+require_once __DIR__ . '/../includes/kalender_sekolah.php';
 
 // optional WA sender
 $hasWa = false;
@@ -109,7 +111,7 @@ $conn->begin_transaction();
 
 try {
     // Lock any existing attendance row for this siswa today
-    $stmt_lock = $conn->prepare("SELECT id, waktu_masuk, waktu_pulang, status_masuk FROM absensi_siswa WHERE siswa_id = ? AND tanggal = ? FOR UPDATE");
+    $stmt_lock = $conn->prepare("SELECT id, waktu_masuk, waktu_pulang, status_masuk, status_harian FROM absensi_siswa WHERE siswa_id = ? AND tanggal = ? FOR UPDATE");
     if (!$stmt_lock) {
         throw new Exception('Prepare lock failed: ' . $conn->error);
     }
@@ -150,7 +152,13 @@ try {
         if ($row) {
             if (!empty($row['waktu_masuk'])) {
                 $conn->rollback();
-                jsonResponse('error', 'Siswa sudah melakukan absensi masuk hari ini.');
+                // Setelah jam pulang, siswa yang lupa memilih PULANG diberi tahu caranya.
+                $pesan_masuk = 'Siswa sudah absen masuk hari ini pukul ' . date('H.i', strtotime($row['waktu_masuk'])) . '.';
+                $hari_absen  = infoHariSekolah($conn, $tanggal);
+                if ($hari_absen['masuk_sekolah'] && $waktu_now >= $hari_absen['jam_pulang']) {
+                    $pesan_masuk .= ' Untuk absen pulang, pilih mode PULANG.';
+                }
+                jsonResponse('error', $pesan_masuk);
             } else {
                 $foto_path = null;
                 if ($foto_base64) {
@@ -218,69 +226,63 @@ try {
             ]);
         }
     } elseif ($mode === 'pulang') {
-        if ($row) {
-            if (!empty($row['waktu_pulang'])) {
-                $conn->rollback();
-                jsonResponse('error', 'Absensi pulang sudah tercatat sebelumnya.');
-            } else {
-                $foto_path = null;
-                if ($foto_base64) $foto_path = $savePhoto($foto_base64, 'pulang');
-                $stmt_up = $conn->prepare("UPDATE absensi_siswa SET waktu_pulang = ?, foto_pulang = ? WHERE id = ?");
-                if (!$stmt_up) throw new Exception('Prepare update pulang failed: ' . $conn->error);
-                $stmt_up->bind_param('ssi', $waktu_now, $foto_path, $row['id']);
-                if (!$stmt_up->execute()) throw new Exception('Execute update pulang failed: ' . $stmt_up->error);
-                $stmt_up->close();
-                $conn->commit();
-
-                // Antri notifikasi WA — dikirim setelah respons
-                if ($hasWa && !empty($siswa['kontak_ortu'])) {
-                    $nomor  = formatNomorWA($siswa['kontak_ortu']);
-                    $pesan  = "INFO ABSENSI SMK TERPADU AL HASAN\n\n";
-                    $pesan .= "Yth. Bpk/Ibu Wali dari:\n";
-                    $pesan .= "Nama: *" . $siswa['nama_siswa'] . "*\n";
-                    $pesan .= "Kelas: " . $siswa['kelas'] . "\n\n";
-                    $pesan .= "Diberitahukan bahwa hari ini (" . date('d/m/Y') . ") Ananda telah melakukan absensi *PULANG* pada pukul *" . date('H:i', strtotime($waktu_now)) . " WIB*.\n\n";
-                    $pesan .= "Terima kasih.";
-                    $wa_queue[] = ['nomor' => $nomor, 'pesan' => $pesan];
-                }
-
-                jsonResponse('success', 'Absensi pulang berhasil dicatat.', [
-                    'nama_siswa' => $siswa['nama_siswa'],
-                    'kelas' => $siswa['kelas'],
-                    'waktu_pulang' => $waktu_now,
-                    'foto_pulang' => isset($foto_path) ? $foto_path : null
-                ]);
-            }
-        } else {
-            $foto_path = null;
-            if ($foto_base64) $foto_path = $savePhoto($foto_base64, 'pulang');
-            $stmt_ins = $conn->prepare("INSERT INTO absensi_siswa (siswa_id, tanggal, waktu_pulang, foto_pulang, status_masuk) VALUES (?, ?, ?, ?, ?)");
-            if (!$stmt_ins) throw new Exception('Prepare insert pulang failed: ' . $conn->error);
-            $status_val = 'Pulang';
-            $stmt_ins->bind_param('issss', $siswa_id, $tanggal, $waktu_now, $foto_path, $status_val);
-            if (!$stmt_ins->execute()) throw new Exception('Execute insert pulang failed: ' . $stmt_ins->error);
-            $stmt_ins->close();
-            $conn->commit();
-
-            // Antri notifikasi WA — dikirim setelah respons
-            if ($hasWa && !empty($siswa['kontak_ortu'])) {
-                $nomor  = formatNomorWA($siswa['kontak_ortu']);
-                $pesan  = "INFO ABSENSI SMK TERPADU AL HASAN\n\n";
-                $pesan .= "Yth. Bapak/Ibu Orang Tua/Wali dari:\n";
-                $pesan .= "Nama: *" . $siswa['nama_siswa'] . "*\n";
-                $pesan .= "Kelas: " . $siswa['kelas'] . "\n\n";
-                $pesan .= "Diberitahukan bahwa hari ini (" . date('d/m/Y') . ") Ananda telah melakukan absensi *PULANG* pada pukul *" . date('H:i', strtotime($waktu_now)) . " WIB*.\n\n";
-                $pesan .= "Terima kasih.";
-                $wa_queue[] = ['nomor' => $nomor, 'pesan' => $pesan];
-            }
-
-            jsonResponse('success', 'Absensi pulang berhasil disimpan.', [
-                'nama_siswa' => $siswa['nama_siswa'],
-                'kelas' => $siswa['kelas'],
-                'waktu_pulang' => $waktu_now,
-                'foto_pulang' => isset($foto_path) ? $foto_path : null
-            ]);
+        // Absen pulang wajib. Empat penolakan, semuanya sebelum foto disimpan:
+        // - belum absen masuk. Dulu baris baru dibuat dengan status_masuk
+        //   'Pulang', nilai yang tidak ada di enum, sehingga yang sampai ke
+        //   kiosk hanya galat server;
+        // - sudah absen pulang;
+        // - sudah diberi izin pulang oleh guru piket (absen_manual.php);
+        // - hari sekolah, sebelum jam pulang hari itu. Tanpa aturan ini siswa
+        //   bisa absen masuk lalu langsung absen pulang di pagi hari.
+        // Hari tanpa sekolah tidak dibatasi jam.
+        if (!$row || empty($row['waktu_masuk'])) {
+            $conn->rollback();
+            jsonResponse('error', 'Belum ada absen masuk hari ini, jadi absen pulang belum bisa dicatat.');
         }
+        if (!empty($row['waktu_pulang'])) {
+            $conn->rollback();
+            jsonResponse('error', 'Absensi pulang sudah tercatat sebelumnya.');
+        }
+        if ($row['status_harian'] === 'Izin') {
+            $conn->rollback();
+            jsonResponse('error', 'Izin pulang siswa ini sudah dicatat guru piket. Tidak perlu absen pulang.');
+        }
+        $hari_absen = infoHariSekolah($conn, $tanggal);
+        if ($hari_absen['masuk_sekolah'] && $waktu_now < $hari_absen['jam_pulang']) {
+            $conn->rollback();
+            jsonResponse('error', 'Absen pulang baru dibuka pukul ' . date('H.i', strtotime($hari_absen['jam_pulang'])) . '. Jika harus pulang lebih awal, minta izin ke guru piket.');
+        }
+
+        $foto_path = null;
+        if ($foto_base64) $foto_path = $savePhoto($foto_base64, 'pulang');
+        // Absen pulang yang baru datang setelah cron sore berjalan (misalnya
+        // siswa ekskul) langsung membetulkan golongannya, tanpa menunggu
+        // Hitung ulang. Golongan lain, termasuk izin pulang, tidak disentuh.
+        $stmt_up = $conn->prepare("UPDATE absensi_siswa SET waktu_pulang = ?, foto_pulang = ?, status_harian = IF(status_harian = 'Pulang Lebih Awal', 'Hadir', status_harian) WHERE id = ?");
+        if (!$stmt_up) throw new Exception('Prepare update pulang failed: ' . $conn->error);
+        $stmt_up->bind_param('ssi', $waktu_now, $foto_path, $row['id']);
+        if (!$stmt_up->execute()) throw new Exception('Execute update pulang failed: ' . $stmt_up->error);
+        $stmt_up->close();
+        $conn->commit();
+
+        // Antri notifikasi WA — dikirim setelah respons
+        if ($hasWa && !empty($siswa['kontak_ortu'])) {
+            $nomor  = formatNomorWA($siswa['kontak_ortu']);
+            $pesan  = "INFO ABSENSI SMK TERPADU AL HASAN\n\n";
+            $pesan .= "Yth. Bpk/Ibu Wali dari:\n";
+            $pesan .= "Nama: *" . $siswa['nama_siswa'] . "*\n";
+            $pesan .= "Kelas: " . $siswa['kelas'] . "\n\n";
+            $pesan .= "Diberitahukan bahwa hari ini (" . date('d/m/Y') . ") Ananda telah melakukan absensi *PULANG* pada pukul *" . date('H:i', strtotime($waktu_now)) . " WIB*.\n\n";
+            $pesan .= "Terima kasih.";
+            $wa_queue[] = ['nomor' => $nomor, 'pesan' => $pesan];
+        }
+
+        jsonResponse('success', 'Absensi pulang berhasil dicatat.', [
+            'nama_siswa' => $siswa['nama_siswa'],
+            'kelas' => $siswa['kelas'],
+            'waktu_pulang' => $waktu_now,
+            'foto_pulang' => isset($foto_path) ? $foto_path : null
+        ]);
     } else {
         $conn->rollback();
         jsonResponse('error', 'Mode tidak dikenali.');
