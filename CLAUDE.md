@@ -293,7 +293,10 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   dan belum disapu ke halaman admin lain. Ditemukan di
   `admin/absensi_manual.php:76`.
 - **Sedang** — login tanpa `session_regenerate_id(true)`, tanpa pembatasan
-  percobaan, tanpa token CSRF di form admin.
+  percobaan, tanpa token CSRF di form admin. Ketiganya sudah ada di
+  `login_piket.php` dan `includes/sesi_piket.php` (commit `a81308f`,
+  `5a39cea`), termasuk penguncian per NIK yang atomik — pola yang bisa
+  ditiru saat login admin dibenahi.
 - **Sedang** — 56 berkas membuka koneksi database sendiri padahal `db.php`
   sudah menyediakan `$conn`.
 - **Rendah** — blok `catch` di keempat endpoint unggah repo API mengirim
@@ -313,6 +316,84 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~`absen_manual.php` dan `api/proses_absen_manual.php` terbuka untuk
+  umum~~ — commit `5a39cea`, `a81308f`, `57c3159`, dan `8069d33`, satu
+  berkas per langkah. Halaman yang ditautkan dari sidebar kiosk ini bisa
+  dipakai siapa pun tanpa login untuk mencatat Sakit/Izin/Alpa siswa mana
+  pun, dan orang tuanya langsung menerima WA. Menutup halamannya saja tidak
+  cukup, karena endpoint-nya bisa dipanggil langsung — keduanya kini dijaga.
+
+  Yang boleh mencatat ada dua, ditentukan `pencatatAbsenManual()` di
+  `includes/sesi_piket.php`: guru yang terjadwal piket **hari ini**
+  (`jadwal_piket` Aktif) dan masuk lewat `login_piket.php`, atau admin yang
+  sedang login di panel admin sebagai pengganti guru piket yang berhalangan.
+  Kalau sesi admin tertinggal di peramban yang sama, guru piket didahulukan.
+  Setiap catatan menyimpan pencatatnya di `log_absen_manual` (`guru_id` atau
+  `admin_id`, beserta `cara_masuk`) dalam satu transaksi dengan `INSERT`
+  absensinya: kalau log gagal ditulis, absensinya batal dan WA tidak
+  terkirim. Endpoint juga menuntut token CSRF dari formulirnya, dan menjawab
+  kiriman tanpa sesi dengan bentuk `sendResponse()` yang sama ditambah
+  `perlu_masuk`.
+
+  `login_piket.php` memakai NIK (kolom `guru.nip`, berlabel "NIK" di
+  aplikasi) dan password aplikasi, diperiksa `password_verify()` seperti
+  `login.php` di repo API; `auth_token` tidak disentuh. Halamannya terbuka
+  untuk umum, jadi ia tidak boleh menjadi alat untuk menebak password
+  aplikasi guru:
+
+  - semua kegagalan memakai satu pesan yang sama;
+  - percobaan dicatat secara atomik (`INSERT … ON DUPLICATE KEY UPDATE
+    gagal = gagal + 1`) **sebelum** password diperiksa. Membaca hitungan
+    lalu menulisnya kembali bisa dilewati dengan permintaan serentak —
+    semuanya membaca angka yang sama;
+  - percobaan keenam mengunci NIK itu 15 menit, dan selama terkunci
+    password tidak diperiksa sama sekali;
+  - NIK yang tidak terdaftar tetap melewati `password_verify()` terhadap
+    hash tiruan cost 10, supaya lama respons tidak membedakannya.
+
+  Sesi piket berkunci `piket_` sehingga Keluar tidak mengeluarkan admin,
+  hanya sah pada tanggal yang sama, berakhir setelah 15 menit tanpa
+  aktivitas, dan jadwal piketnya diperiksa ulang di setiap permintaan.
+
+  Dua tabelnya dibuat manual di phpMyAdmin, jadi tidak ada di repo:
+
+      CREATE TABLE percobaan_login_piket (
+        nip VARCHAR(50) NOT NULL, gagal INT UNSIGNED NOT NULL DEFAULT 0,
+        terkunci_sampai DATETIME NULL, terakhir DATETIME NOT NULL,
+        PRIMARY KEY (nip));
+      CREATE TABLE log_absen_manual (
+        id INT NOT NULL AUTO_INCREMENT, waktu DATETIME NOT NULL,
+        guru_id INT NULL, admin_id INT NULL, cara_masuk VARCHAR(20) NOT NULL,
+        siswa_id INT NOT NULL, tanggal DATE NOT NULL,
+        status VARCHAR(20) NOT NULL,
+        PRIMARY KEY (id), KEY tanggal (tanggal), KEY guru_id (guru_id),
+        CONSTRAINT ada_pencatat CHECK (guru_id IS NOT NULL OR admin_id IS NOT NULL));
+
+  Membuka NIK yang terkunci sebelum waktunya:
+  `DELETE FROM percobaan_login_piket WHERE nip = '…';`
+
+  Terverifikasi di produksi 28 September 2026: dengan NIK akun uji,
+  kegagalan ditolak dengan pesan umum, percobaan keenam dikunci sampai 15
+  menit kemudian (`gagal` kembali 0) dan terbuka lewat `DELETE`, dan
+  `error_log` mencatat `[login_piket] gagal masuk, percobaan ke-N`; guru
+  piket hari itu masuk dan melihat namanya beserta tombol Keluar; admin
+  yang login di panel admin melihat "Admin: …" tanpa tombol Keluar;
+  `absen_manual.php` tanpa sesi dijawab 302 ke `login_piket.php`; catatan
+  yang disimpan lewat halaman muncul di `log_absen_manual` beserta
+  pencatatnya; dan endpoint yang dikirimi `siswa_id` 999999 tanpa sesi
+  menjawab "Sesi Anda
+  berakhir…" dengan `perlu_masuk`. `siswa_id` yang tidak ada itu sengaja:
+  sebelum gerbangnya terpasang pun, uji itu tidak menyimpan baris atau
+  mengirim WA.
+
+  Sengaja tidak disentuh: pembanding password teks polos — tidak
+  ditambahkan, jadi guru yang password-nya belum ber-hash harus di-reset
+  lewat `admin/guru.php`; penolakan "Siswa sudah melakukan absensi hari
+  ini", yang harus diubah bersamaan dengan Alpa otomatis supaya guru piket
+  bisa mengoreksinya; `$e->getMessage()` di respons galat; dan atribut
+  `data-nama`/`data-kelas` tanpa escape di `absen_manual.php`. Di PC kiosk,
+  tawaran menyimpan password di peramban harus dimatikan, karena guru
+  mengetik password aplikasinya di PC bersama.
 - ~~Jalur unggah repo ini, fase 2 dan 3~~ — commit `2569f6f` (fase 2,
   `absensi_pkl.php`) dan `9c10504` (fase 3, `admin/siswa.php` dan kedua
   jalur `admin/absensi_manual.php`). Menutup pekerjaan empat fase yang
