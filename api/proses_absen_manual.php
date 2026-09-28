@@ -37,12 +37,27 @@ try {
     sendResponse('error', 'Error sistem: ' . $e->getMessage());
 }
 
+// Hanya guru piket hari ini yang sedang masuk (login_piket.php), atau admin
+// yang sedang login di panel admin sebagai pengganti guru piket.
+// Bentuk respons tetap sendResponse() milik berkas ini.
+require_once __DIR__ . '/../includes/sesi_piket.php';
+$pencatat = pencatatAbsenManual($conn);
+if ($pencatat === null) {
+    sendResponse('error', 'Sesi Anda berakhir. Silakan masuk lagi.', ['perlu_masuk' => true]);
+}
+
 // Ambil data JSON
 $input_raw = file_get_contents('php://input');
 $input = json_decode($input_raw, true);
 
 if (json_last_error() !== JSON_ERROR_NONE) {
     sendResponse('error', 'Format data tidak valid');
+}
+
+// Token dari formulir absen_manual.php. Tanpa ini, situs lain bisa menyuruh
+// peramban guru piket yang sedang masuk mengirim absen atas namanya.
+if (!cekCsrfPiket($input['csrf_token'] ?? '')) {
+    sendResponse('error', 'Sesi tidak sah. Silakan masuk lagi.', ['perlu_masuk' => true]);
 }
 
 $siswa_id = isset($input['siswa_id']) ? intval($input['siswa_id']) : 0;
@@ -101,6 +116,10 @@ try {
     }
     $stmt_cek->close();
 
+    // Satu transaksi dengan catatan pencatat di bawah: tidak ada catatan
+    // manual tanpa nama pencatatnya.
+    $conn->begin_transaction();
+
     // 4. PERBAIKAN: Cek apakah kolom menggunakan ENUM
     if (strpos($column_info['Type'], 'enum') !== false) {
         // Jika ENUM, ambil nilai yang valid
@@ -129,6 +148,17 @@ try {
     }
     
     $stmt_insert->close();
+
+    $waktu_log    = date('Y-m-d H:i:s');
+    $guru_id_log  = $pencatat['jenis'] === 'guru'  ? $pencatat['id'] : null;
+    $admin_id_log = $pencatat['jenis'] === 'admin' ? $pencatat['id'] : null;
+    $stmt_log = $conn->prepare("INSERT INTO log_absen_manual (waktu, guru_id, admin_id, cara_masuk, siswa_id, tanggal, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt_log->bind_param("siisiss", $waktu_log, $guru_id_log, $admin_id_log, $pencatat['cara'], $siswa_id, $tanggal_hari_ini, $status_manual);
+    if (!$stmt_log->execute()) {
+        throw new Exception('Gagal mencatat pencatat: ' . $stmt_log->error);
+    }
+    $stmt_log->close();
+    $conn->commit();
     
     logError("Absensi saved for: " . $siswa['nama_siswa']);
 
@@ -173,6 +203,7 @@ try {
     sendResponse('success', $response_message);
 
 } catch (Exception $e) {
+    $conn->rollback();
     logError('Error: ' . $e->getMessage());
     sendResponse('error', 'Terjadi kesalahan: ' . $e->getMessage());
 }
