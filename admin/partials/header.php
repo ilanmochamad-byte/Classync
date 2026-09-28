@@ -44,6 +44,7 @@ require '../includes/db.php';
             <li><a class="dropdown-item" href="jadwal_mengajar.php">Jadwal Mengajar</a></li>
             <li><a class="dropdown-item" href="jadwal_piket.php">Jadwal Piket</a></li>
             <li><a class="dropdown-item" href="jadwal_ekskul.php">Jadwal Ekskul</a></li>
+            <li><a class="dropdown-item" href="kalender_sekolah.php">Kalender Sekolah</a></li>
           </ul>
         </li>
         <!-- <li class="nav-item">-->
