@@ -1,5 +1,15 @@
 <?php
 require 'includes/db.php';
+require_once 'includes/sesi_piket.php';
+
+// Hanya guru piket hari ini yang sedang masuk (login_piket.php), atau admin
+// yang sedang login di panel admin sebagai pengganti guru piket.
+$pencatat = pencatatAbsenManual($conn);
+if ($pencatat === null) {
+    header('Location: login_piket.php');
+    exit;
+}
+$csrf_piket = tokenCsrfPiket();
 
 // Ambil semua siswa yang BELUM absen hari ini
 $tanggal_hari_ini = date('Y-m-d');
@@ -325,9 +335,24 @@ $hari_format = $hari_indonesia[date('l')];
                         <small class="text-muted">SMK Terpadu Al Hasan</small>
                     </div>
                 </a>
-                <a href="absen-siswa.php" class="back-button">
-                    <i class="bi bi-arrow-left me-2"></i>Kembali
-                </a>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <span class="small text-muted">
+                        <i class="bi bi-person-badge me-1"></i><?php echo $pencatat['jenis'] === 'admin' ? 'Admin' : 'Guru piket'; ?>:
+                        <?php echo htmlspecialchars($pencatat['nama'], ENT_QUOTES, 'UTF-8'); ?>
+                    </span>
+                    <?php if ($pencatat['jenis'] === 'guru'): ?>
+                        <form method="post" action="login_piket.php" class="m-0">
+                            <input type="hidden" name="aksi" value="keluar">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_piket, ENT_QUOTES, 'UTF-8'); ?>">
+                            <button type="submit" class="back-button">
+                                <i class="bi bi-box-arrow-right me-2"></i>Keluar
+                            </button>
+                        </form>
+                    <?php endif; ?>
+                    <a href="absen-siswa.php" class="back-button">
+                        <i class="bi bi-arrow-left me-2"></i>Kembali
+                    </a>
+                </div>
             </div>
         </nav>
 
@@ -381,7 +406,7 @@ $hari_format = $hari_indonesia[date('l')];
                         </a>
                     </div>
                 <?php else: ?>
-                    <form id="manual-absen-form">
+                    <form id="manual-absen-form" data-csrf="<?php echo htmlspecialchars($csrf_piket, ENT_QUOTES, 'UTF-8'); ?>">
                         <!-- Search Box -->
                         <div class="search-box">
                             <i class="bi bi-search"></i>
@@ -529,7 +554,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     siswa_id: siswaId,
-                    status: status
+                    status: status,
+                    csrf_token: form.dataset.csrf
                 })
             })
             .then(response => {
@@ -539,6 +565,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 return response.json();
             })
             .then(result => {
+                // Sesi guru piket habis atau token tidak sah: kembali ke halaman masuk.
+                if (result.data && result.data.perlu_masuk) {
+                    window.location.href = 'login_piket.php';
+                    return;
+                }
+
                 if (result.status === 'success') {
                     showNotification('✅ ' + result.message, true);
                     
