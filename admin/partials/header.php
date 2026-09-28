@@ -57,6 +57,7 @@ require '../includes/db.php';
                 <li><a class="dropdown-item" href="laporan_absen_harian.php">Absensi Harian Guru</a></li>
                 <li><a class="dropdown-item" href="statistik.php">Statistik Guru</a></li>
                 <li><a class="dropdown-item" href="laporan_absensi_siswa.php">Absensi Siswa</a></li>
+                <li><a class="dropdown-item" href="status_harian.php">Status Harian Siswa</a></li>
                 <li><a class="dropdown-item" href="statistik_siswa.php">Statistik Siswa</a></li>
                 <li><a class="dropdown-item" href="pusat_layanan_bk.php">Pusat Layanan BK</a></li>
             </ul>
