@@ -28,6 +28,26 @@ $total_hadir = $conn->query("SELECT COUNT(id) as total FROM absensi_siswa WHERE 
 $total_belum = $total_siswa - $total_hadir;
 $persentase_hadir = $total_siswa > 0 ? round(($total_hadir / $total_siswa) * 100, 1) : 0;
 
+// Izin pulang lebih awal: siswa yang sudah absen masuk, belum absen pulang,
+// belum diberi izin pulang, dan bukan siswa PKL. Hanya pada hari sekolah
+// sebelum jam pulang; setelah itu siswa cukup absen pulang di kiosk.
+require_once 'includes/status_harian.php';
+$hari_sekolah     = infoHariSekolah($conn, $tanggal_hari_ini);
+$bisa_izin_pulang = $hari_sekolah['masuk_sekolah'] && date('H:i:s') < $hari_sekolah['jam_pulang'];
+$siswa_bisa_izin  = [];
+if ($bisa_izin_pulang) {
+    $siswa_pkl = daftarSiswaPkl($conn);
+    $stmt_izin = $conn->prepare("SELECT s.id, s.nama_siswa, s.kelas, a.waktu_masuk FROM absensi_siswa a JOIN siswa s ON s.id = a.siswa_id WHERE a.tanggal = ? AND a.waktu_masuk IS NOT NULL AND a.waktu_pulang IS NULL AND (a.status_harian IS NULL OR a.status_harian <> 'Izin') ORDER BY s.kelas, s.nama_siswa");
+    $stmt_izin->bind_param('s', $tanggal_hari_ini);
+    $stmt_izin->execute();
+    foreach ($stmt_izin->get_result()->fetch_all(MYSQLI_ASSOC) as $siswa_masuk) {
+        if (!isset($siswa_pkl[(int)$siswa_masuk['id']])) {
+            $siswa_bisa_izin[] = $siswa_masuk;
+        }
+    }
+    $stmt_izin->close();
+}
+
 // Nama bulan Indonesia
 $bulan_indonesia = [
     'January' => 'Januari', 'February' => 'Februari', 'March' => 'Maret',
@@ -488,6 +508,47 @@ $hari_format = $hari_indonesia[date('l')];
                 <?php endif; ?>
             </div>
         </div>
+
+        <?php if ($bisa_izin_pulang): ?>
+        <!-- Izin Pulang Lebih Awal -->
+        <div class="card card-custom mt-4">
+            <div class="card-header-custom">
+                <h4 class="mb-1">
+                    <i class="bi bi-door-open-fill me-2"></i>Izin Pulang Lebih Awal
+                </h4>
+                <p class="mb-0 opacity-75">
+                    Untuk siswa yang sudah absen masuk dan harus pulang sebelum pukul <?php echo date('H.i', strtotime($hari_sekolah['jam_pulang'])); ?>.
+                    Dicatat sebagai Izin, dan orang tua menerima WA.
+                </p>
+            </div>
+            <div class="card-body p-4">
+                <?php if (empty($siswa_bisa_izin)): ?>
+                    <p class="text-muted mb-0">Belum ada siswa yang absen masuk dan belum pulang.</p>
+                <?php else: ?>
+                    <form id="izin-pulang-form" data-csrf="<?php echo htmlspecialchars($csrf_piket, ENT_QUOTES, 'UTF-8'); ?>">
+                        <div class="mb-4">
+                            <label for="izin-pulang-select" class="form-label fw-bold">
+                                <i class="bi bi-person-fill me-2"></i>Pilih Siswa yang Izin Pulang
+                            </label>
+                            <select id="izin-pulang-select" class="form-select form-select-custom" required>
+                                <option value="" selected disabled>-- Pilih Nama Siswa (<?php echo count($siswa_bisa_izin); ?> siswa sudah absen masuk) --</option>
+                                <?php foreach ($siswa_bisa_izin as $siswa_masuk): ?>
+                                    <option value="<?php echo (int)$siswa_masuk['id']; ?>">
+                                        <?php echo htmlspecialchars($siswa_masuk['nama_siswa'] . ' - ' . $siswa_masuk['kelas'] . ' (masuk ' . date('H.i', strtotime($siswa_masuk['waktu_masuk'])) . ')', ENT_QUOTES, 'UTF-8'); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="text-center">
+                            <button type="submit" class="btn btn-submit-custom">
+                                <i class="bi bi-door-open-fill me-2"></i>Catat Izin Pulang dan Kirim WA
+                            </button>
+                        </div>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -625,6 +686,69 @@ document.addEventListener('DOMContentLoaded', function() {
             .finally(() => {
                 submitButton.disabled = false;
                 submitButton.innerHTML = '<i class="bi bi-send-check-fill me-2"></i>Simpan dan Kirim Notifikasi WA';
+            });
+        });
+    }
+
+    // Izin pulang lebih awal. Token CSRF-nya dibawa formulir ini sendiri,
+    // karena formulir absen di atas tidak tampil saat semua siswa sudah
+    // punya catatan hari ini.
+    const izinForm = document.getElementById('izin-pulang-form');
+    if (izinForm) {
+        const izinSelect = document.getElementById('izin-pulang-select');
+        izinForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            if (!izinSelect.value) {
+                showNotification('⚠️ Harap pilih siswa terlebih dahulu.', false);
+                return;
+            }
+            const opsi = izinSelect.options[izinSelect.selectedIndex];
+            if (!confirm('Catat izin pulang lebih awal untuk ' + opsi.text.trim() + '? Orang tua akan menerima WA.')) {
+                return;
+            }
+
+            const tombol = izinForm.querySelector('button[type="submit"]');
+            const labelTombol = tombol.innerHTML;
+            tombol.disabled = true;
+            tombol.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Memproses...';
+
+            fetch('api/proses_absen_manual.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    siswa_id: izinSelect.value,
+                    status: 'Izin Pulang',
+                    csrf_token: izinForm.dataset.csrf
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(result => {
+                if (result.data && result.data.perlu_masuk) {
+                    window.location.href = 'login_piket.php';
+                    return;
+                }
+                if (result.status === 'success') {
+                    showNotification('✅ ' + result.message, true);
+                    izinSelect.removeChild(opsi);
+                    izinSelect.value = '';
+                    izinSelect.options[0].text = `-- Pilih Nama Siswa (${izinSelect.options.length - 1} siswa sudah absen masuk) --`;
+                } else {
+                    showNotification('❌ ' + result.message, false);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showNotification('❌ Terjadi kesalahan: ' + error.message, false);
+            })
+            .finally(() => {
+                tombol.disabled = false;
+                tombol.innerHTML = labelTombol;
             });
         });
     }

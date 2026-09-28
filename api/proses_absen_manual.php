@@ -41,6 +41,7 @@ try {
 // yang sedang login di panel admin sebagai pengganti guru piket.
 // Bentuk respons tetap sendResponse() milik berkas ini.
 require_once __DIR__ . '/../includes/sesi_piket.php';
+require_once __DIR__ . '/../includes/status_harian.php';
 $pencatat = pencatatAbsenManual($conn);
 if ($pencatat === null) {
     sendResponse('error', 'Sesi Anda berakhir. Silakan masuk lagi.', ['perlu_masuk' => true]);
@@ -69,7 +70,8 @@ if (empty($siswa_id) || empty($status_manual)) {
 }
 
 // PERBAIKAN: Pastikan status sesuai format database
-$valid_statuses = ['Sakit', 'Izin', 'Alpha', 'Alpa'];
+// 'Izin Pulang' bukan nilai status_masuk; ia punya cabang sendiri di bawah.
+$valid_statuses = ['Sakit', 'Izin', 'Alpha', 'Alpa', 'Izin Pulang'];
 if (!in_array($status_manual, $valid_statuses)) {
     sendResponse('error', 'Status tidak valid');
 }
@@ -104,6 +106,81 @@ try {
     
     $kontak_ortu = $siswa['kontak_ortu'];
     $tanggal_hari_ini = date('Y-m-d');
+
+    // Izin pulang lebih awal: siswa yang sudah absen masuk hari ini pulang
+    // sebelum jam pulang dengan izin sekolah. Barisnya sudah ada, jadi yang
+    // diubah hanya status_harian. status_masuk (Tepat Waktu/Terlambat) tetap,
+    // karena monitoring_siswa.tsx di ClassyncApp membacanya. Cron sore tidak
+    // pernah menimpa Izin pada baris yang punya absen masuk.
+    if ($status_manual === 'Izin Pulang') {
+        $hari_sekolah = infoHariSekolah($conn, $tanggal_hari_ini);
+        if (!$hari_sekolah['masuk_sekolah']) {
+            sendResponse('error', 'Hari ini bukan hari sekolah.');
+        }
+        if (date('H:i:s') >= $hari_sekolah['jam_pulang']) {
+            sendResponse('error', 'Sudah lewat jam pulang (' . date('H.i', strtotime($hari_sekolah['jam_pulang'])) . '). Siswa cukup absen pulang di kiosk.');
+        }
+        if (isset(daftarSiswaPkl($conn)[$siswa_id])) {
+            sendResponse('error', 'Siswa ini sedang PKL. Izin pulangnya tidak dicatat di sini.');
+        }
+
+        // Satu transaksi dengan catatan pencatatnya, seperti status lain.
+        $conn->begin_transaction();
+        $stmt_baris = $conn->prepare("SELECT id, waktu_masuk, waktu_pulang, status_harian FROM absensi_siswa WHERE siswa_id = ? AND tanggal = ? FOR UPDATE");
+        $stmt_baris->bind_param("is", $siswa_id, $tanggal_hari_ini);
+        $stmt_baris->execute();
+        $baris = $stmt_baris->get_result()->fetch_assoc();
+        $stmt_baris->close();
+
+        if (!$baris || empty($baris['waktu_masuk'])) {
+            $conn->rollback();
+            sendResponse('error', 'Siswa belum absen masuk hari ini. Izin pulang hanya untuk siswa yang sudah hadir.');
+        }
+        if (!empty($baris['waktu_pulang'])) {
+            $conn->rollback();
+            sendResponse('error', 'Siswa sudah absen pulang hari ini.');
+        }
+        if ($baris['status_harian'] === 'Izin') {
+            $conn->rollback();
+            sendResponse('error', 'Izin pulang siswa ini sudah dicatat.');
+        }
+
+        $baris_id = (int)$baris['id'];
+        $stmt_izin = $conn->prepare("UPDATE absensi_siswa SET status_harian = 'Izin' WHERE id = ?");
+        $stmt_izin->bind_param("i", $baris_id);
+        $stmt_izin->execute();
+        $stmt_izin->close();
+
+        $waktu_log    = date('Y-m-d H:i:s');
+        $guru_id_log  = $pencatat['jenis'] === 'guru'  ? $pencatat['id'] : null;
+        $admin_id_log = $pencatat['jenis'] === 'admin' ? $pencatat['id'] : null;
+        $stmt_log = $conn->prepare("INSERT INTO log_absen_manual (waktu, guru_id, admin_id, cara_masuk, siswa_id, tanggal, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt_log->bind_param("siisiss", $waktu_log, $guru_id_log, $admin_id_log, $pencatat['cara'], $siswa_id, $tanggal_hari_ini, $status_manual);
+        $stmt_log->execute();
+        $stmt_log->close();
+        $conn->commit();
+
+        $wa_sent = false;
+        if (!empty($kontak_ortu)) {
+            try {
+                $pesan_wa  = "INFO ABSENSI SMK TERPADU AL HASAN\n\n";
+                $pesan_wa .= "Yth. Bapak/Ibu Orang Tua/Wali dari:\n";
+                $pesan_wa .= "Nama: *" . $siswa['nama_siswa'] . "*\n";
+                $pesan_wa .= "Kelas: " . $siswa['kelas'] . "\n\n";
+                $pesan_wa .= "Diberitahukan bahwa hari ini (" . date('d/m/Y') . ") Ananda *IZIN PULANG LEBIH AWAL* pada pukul *" . date('H:i') . " WIB* dengan izin sekolah.\n\n";
+                $pesan_wa .= "Terima kasih.";
+                $wa_sent = kirimNotifikasiWA(formatNomorWA($kontak_ortu), $pesan_wa);
+            } catch (Exception $e) {
+                logError('WA error: ' . $e->getMessage());
+            }
+        }
+
+        $response_message = 'Izin pulang untuk ' . $siswa['nama_siswa'] . ' berhasil dicatat';
+        if (!empty($kontak_ortu)) {
+            $response_message .= $wa_sent ? ' dan notifikasi WhatsApp telah dikirim' : ' namun notifikasi WhatsApp GAGAL dikirim (Cek Log)';
+        }
+        sendResponse('success', $response_message);
+    }
 
     // 3. Cek apakah sudah absen
     $stmt_cek = $conn->prepare("SELECT id FROM absensi_siswa WHERE siswa_id = ? AND tanggal = ?");
