@@ -220,6 +220,146 @@ dan penolong APNs ada di `api.smkt.alhasan.co.id/error_log`. Mencari di situs
 yang salah menghasilkan log kosong, dan log kosong gampang disalahartikan
 sebagai "tidak terjadi apa-apa".
 
+## Absensi siswa: kalender sekolah, status harian, dan aturan pulang
+
+Sejak September 2026, absensi siswa dipindah bertahap ke sidik jari
+(U.are.U 4500). Yang sudah berjalan adalah fondasinya, dikerjakan satu
+berkas per langkah: kalender sekolah di PR #6–#10, lalu status harian dan
+aturan pulang di PR #12–#16.
+
+**Satu sumber jam sekolah.** `infoHariSekolah()` di
+`includes/kalender_sekolah.php` menjawab "tanggal ini masuk sekolah atau tidak,
+dan pulang jam berapa". Urutannya:
+
+1. Pulang Cepat di tabel `kalender_sekolah`;
+2. `jam_pulang_jumat` untuk hari Jumat;
+3. `jam_pulang` untuk hari lain.
+
+Minggu dan tanggal Libur tidak masuk sekolah. Kalender diisi admin/TU di
+`admin/kalender_sekolah.php` (menu Jadwal). Kiosk, cron sore, izin pulang, dan
+aturan pulang semuanya memakai fungsi ini, jadi jangan menghitung ulang
+aturannya di tempat lain. Arti kunci `jam_pulang` sengaja tidak diubah
+(Senin–Kamis dan Sabtu), karena `get_monitoring_absensi.php` di repo API masih
+membacanya apa adanya.
+
+**Status harian.** `status_masuk` hanya mencatat kedatangan, dan sengaja tidak
+diubah karena `monitoring_siswa.tsx` membandingkannya persis. Kehadiran final
+disimpan di kolom `absensi_siswa.status_harian`:
+
+| Keadaan baris | `status_harian` |
+|---|---|
+| absen masuk dan absen pulang | Hadir |
+| absen masuk tanpa absen pulang | Pulang Lebih Awal |
+| izin pulang dari guru piket | Izin |
+| Sakit/Izin/Alpa (juga ejaan lama Alpha) dari absen manual | sama |
+| siswa yang punya baris `penempatan_pkl` | tidak disentuh |
+
+Penggolongannya ada di `includes/status_harian.php`, dan dijalankan oleh
+`cron_status_harian.php` lewat cron cPanel setiap hari pukul 17.00:
+
+    0 17 * * * /usr/bin/php /DATA/k1807225/public_html/smkt.alhasan.co.id/classync/cron_status_harian.php >/dev/null 2>&1
+
+- **Bukti cron hidup ada di tabel `log_status_harian`.**
+  - Setiap jalan tercatat di sana, termasuk Minggu, Libur, dan jalan sebelum
+    jam pulang (hasilnya `dilewati`). Dari tabel itu juga terlihat apakah jam
+    cron-nya benar.
+  - Jalan manual dari Terminal juga tercatat berpemicu `cron`, jadi bedakan
+    lewat jamnya.
+  - Galat cron masuk ke `classync/error_log`.
+- **Dihitung ulang setiap kali jalan,** jadi aman diulang. Hanya satu nilai
+  yang dipertahankan: Izin pada baris yang punya absen masuk. Penggolongan
+  sendiri tidak pernah menghasilkan nilai itu, jadi Izin di sana pasti izin
+  pulang.
+- **Tidak menambah baris.** Siswa yang sama sekali tidak absen dibiarkan
+  sampai Alpa otomatis dibuat.
+- **Tanpa `FOR UPDATE`.** Kolom `tanggal` tidak berindeks sendiri, jadi InnoDB
+  akan mengunci seluruh tabel dan menahan absen di kiosk.
+  - Gantinya, `UPDATE` hanya berlaku kalau isi baris masih sama dengan yang
+    dibaca.
+  - MariaDB 11.6 ke atas (`innodb_snapshot_isolation`) menjawab keadaan yang
+    sama dengan galat 1020. Kodenya menangani galat itu per baris; produksi
+    memakai 10.6.
+  - MariaDB lokal yang lebih baru menyalakan pengaturan itu secara bawaan.
+    Matikan saat menguji kalau ingin meniru produksi.
+- **Siswa PKL dan alumni.**
+  - Siswa PKL berarti siswa yang punya baris di `penempatan_pkl`. Tabel itu
+    belum bertanggal, jadi TU harus menghapus penempatannya setelah PKL
+    selesai; kalau tidak, siswa itu terus dikecualikan. Aturan ini hanya ada
+    di `daftarSiswaPkl()`.
+  - Alumni berarti `kelas = 'Lulus / Alumni'`, yang diisi
+    `admin/mutasi_siswa.php`.
+- **Halaman pantau** ada di `admin/status_harian.php` (Laporan → Status Harian
+  Siswa). Isinya jumlah per golongan, daftar Pulang Lebih Awal, tren absen
+  pulang 14 hari sekolah, dan tombol Hitung ulang.
+
+**Aturan pulang, berlaku mulai 29 September 2026.** `api/proses_absen_siswa.php`
+dipakai kiosk dan menu Absen Siswa di aplikasi. Endpoint ini menolak absen
+pulang dalam tiga keadaan:
+
+- sebelum jam pulang hari itu;
+- siswa belum absen masuk;
+- siswa sudah diberi izin pulang.
+
+Penolakan dikirim sebagai `message` biasa, dan aplikasi versi lama
+menampilkannya apa adanya.
+
+- Siswa yang harus pulang lebih awal dicatat guru piket di kartu Izin Pulang
+  Lebih Awal (`absen_manual.php`). Akibatnya:
+  - `status_harian` menjadi Izin;
+  - tercatat di `log_absen_manual` dengan status `Izin Pulang`;
+  - orang tua menerima WA.
+- Absen pulang setelah cron sore mengubah Pulang Lebih Awal menjadi Hadir.
+- Kiosk memilih mode PULANG sendiri mulai jam pulang. Dulu halaman dimuat
+  ulang setelah setiap scan dan selalu kembali ke MASUK. Itu kemungkinan
+  besar salah satu sebab hanya 16% absen masuk di Agustus 2026 yang diikuti
+  absen pulang.
+
+**Mode senyap.** Belum ada WA untuk Pulang Lebih Awal, dan selain halaman
+pantau belum ada laporan yang membaca `status_harian`. Yang masih menunggu:
+
+- **Alpa otomatis pukul 09.00.**
+  - Harus mengecualikan siswa PKL dan alumni.
+  - Penolakan "Siswa sudah melakukan absensi hari ini" di
+    `api/proses_absen_manual.php` harus diubah bersamaan, supaya guru piket
+    bisa mengoreksi Alpa otomatis.
+- **WA Pulang Lebih Awal,** setelah tren absen pulang di atas 90%, dengan rem
+  darurat. Kalau TU lupa mengisi Pulang Cepat, semua absen pulang hari itu
+  tertolak. Rem itulah yang mencegah WA massal yang keliru.
+- **Sebelas berkas laporan pindah ke `status_harian`,** satu per satu,
+  termasuk dua di repo API. Tanggal sebelum aturan ini berlaku tetap memakai
+  logika lama.
+- **Sidik jarinya sendiri.**
+
+Terverifikasi di produksi 28 September 2026:
+
+- cron yang dijalankan manual menggolongkan 26 baris;
+- halaman pantau cocok dengan log kiosk: 6 Hadir, 20 Pulang Lebih Awal, dan
+  10 PKL dari 36 baris;
+- Hitung ulang oleh admin tercatat;
+- URL cron menjawab 403.
+
+Aturan pulang di kiosk belum teruji di produksi saat catatan ini ditulis.
+
+Tabel dan kolomnya dibuat manual di phpMyAdmin, jadi tidak ada di repo:
+
+    CREATE TABLE kalender_sekolah (
+      tanggal DATE NOT NULL, jenis ENUM('Libur','Pulang Cepat') NOT NULL,
+      jam_pulang TIME NULL, keterangan VARCHAR(150) NOT NULL,
+      admin_id INT NOT NULL, diubah_pada DATETIME NOT NULL,
+      PRIMARY KEY (tanggal),
+      CONSTRAINT jam_sesuai_jenis CHECK ((jenis = 'Libur' AND jam_pulang IS NULL)
+                                      OR (jenis = 'Pulang Cepat' AND jam_pulang IS NOT NULL)));
+    ALTER TABLE absensi_siswa ADD COLUMN status_harian
+      ENUM('Hadir','Pulang Lebih Awal','Sakit','Izin','Alpa') NULL DEFAULT NULL;
+    CREATE TABLE log_status_harian (
+      id INT NOT NULL AUTO_INCREMENT, tanggal DATE NOT NULL, dijalankan DATETIME NOT NULL,
+      pemicu ENUM('cron','admin') NOT NULL, admin_id INT NULL,
+      hasil ENUM('selesai','dilewati') NOT NULL, keterangan VARCHAR(255) NOT NULL DEFAULT '',
+      hadir INT NOT NULL DEFAULT 0, pulang_awal INT NOT NULL DEFAULT 0, izin INT NOT NULL DEFAULT 0,
+      sakit INT NOT NULL DEFAULT 0, alpa INT NOT NULL DEFAULT 0, pkl INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (id), KEY tanggal (tanggal));
+    -- ditambah satu baris pengaturan: jam_pulang_jumat = '10:50:00'
+
 ## Temuan audit
 
 Daftar ini ditinjau audit independen pada 14 September 2026, di luar pekerjaan
@@ -316,6 +456,29 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 
 ### Sudah ditutup
 
+- ~~Enam berkas lama di akar yang bisa mengubah data tanpa login~~ — commit
+  `a394ea4`, `25dd809`, dan `dabfb43`. Keenamnya sudah tidak dipakai, tetapi
+  `cp -f *.php` di `.cpanel.yml` menyalinnya ke webroot di setiap deploy.
+  Tidak satu pun pernah tercatat di sini sebagai temuan:
+  - `laporan_absensi_siswa.php` — laporan siswa versi lama. Bisa mengubah dan
+    menghapus baris `absensi_siswa`, termasuk lewat `?hapus=` dengan GET.
+    Penggantinya `admin/laporan_absensi_siswa.php`.
+  - `hapus_foto_lama.php` — begitu URL-nya dibuka, skrip ini menghapus semua
+    foto bukti absen guru yang lebih dari 30 hari dan mengosongkan
+    `foto_bukti`.
+    - Komentarnya menyebut cron, tetapi berkasnya tanpa penjaga.
+    - Skrip ini tidak pernah berjalan: dump 1 September 2026 masih memuat path
+      foto September 2025.
+    - Berkasnya dihapus, bukan diberi penjaga, karena foto itu bukti honor.
+  - `proses_absen.php` beserta `absen_mengajar.php`, `absen_piket.php`, dan
+    `absen_ekskul.php` — formulir "Pilih Nama Anda". Formulir ini langsung
+    mencatat absensi guru berstatus Hadir, tanpa foto dan tanpa approval,
+    jadi ikut dibayar. Di dump tidak ada jejak pemakaiannya.
+
+  Terverifikasi 28 September 2026: kelima alamat selain `hapus_foto_lama.php`
+  menjawab 404, dan `admin/laporan_absensi_siswa.php` tetap 302 ke login.
+  `hapus_foto_lama.php` sengaja tidak diuji lewat URL (lihat "Jangan
+  lakukan").
 - ~~`absen_manual.php` dan `api/proses_absen_manual.php` terbuka untuk
   umum~~ — commit `5a39cea`, `a81308f`, `57c3159`, dan `8069d33`, satu
   berkas per langkah. Halaman yang ditautkan dari sidebar kiosk ini bisa
@@ -736,6 +899,7 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 - ~~Izin berkas terlalu longgar~~ — `admin/` dari 0777 jadi 0755;
   `absen_ekskul.php`, `absen_mengajar.php`, `absen_piket.php` dari 0666 jadi
   0644. Hanya di server; izin tidak ikut Git, jadi tidak ada jejaknya di repo.
+  Ketiga berkas `absen_*.php` itu kemudian dihapus di `dabfb43`.
 - ~~Perancah pengembang di webroot~~ — `test-tcpdf.php` dan
   `debug_absen_manual.php` dihapus dari repo (commit `432d912`) dan dari
   server. Keduanya mencetak keluaran debug dan bisa dibuka siapa pun.
@@ -819,6 +983,9 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
 - Jangan menulis ulang banyak endpoint sekaligus.
 - Jangan menjalankan perintah sinkronisasi yang menghapus (`rsync --delete`,
   `git clean -fd`) di folder mana pun yang berisi `uploads/`.
+- Jangan memeriksa berkas PHP yang bisa mengubah atau menghapus data dengan
+  membuka URL-nya, termasuk lewat `curl -I`. Permintaan HEAD pun menjalankan
+  skripnya. Periksa keberadaannya lewat File Manager atau Terminal cPanel.
 - Jangan menambahkan `vendor/`, `uploads/`, atau `api-wa/` ke Git.
 - Jangan meng-commit berkas `.sql`, log, atau apa pun yang memuat kredensial —
   riwayat Git permanen.
