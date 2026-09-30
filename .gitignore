@@ -16,6 +16,10 @@ error_log
 *.log
 debug_log.txt
 
+# ── Jembatan sidik jari: keluaran build .NET, selalu dibangun ulang dari sumber ──
+/jembatan/bin/
+/jembatan/obj/
+
 # ── Rahasia & data pribadi — JANGAN PERNAH di-commit ──
 *.sql
 config-*.php
