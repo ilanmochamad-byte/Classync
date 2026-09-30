@@ -28,6 +28,7 @@ using System.Management;
 using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -125,6 +126,21 @@ builder.Services.Configure<EventLogSettings>(s =>
 
 var app = builder.Build();
 var log = app.Logger;
+
+// Tanpa brankas jembatan tidak berguna, dan kunci baru tidak boleh dibuat
+// diam-diam. Jadi kalau gagal dibuka, berhenti.
+Brankas brankas;
+try
+{
+    brankas = Brankas.Buka(folderData, log);
+}
+catch (Exception e) when (e is BrankasRusakException or IOException or UnauthorizedAccessException)
+{
+    log.LogCritical(e, "Jembatan berhenti: brankas di {Folder} tidak bisa dibuka.", folderData);
+    await app.DisposeAsync();
+    return 1;
+}
+
 var versi = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
 var mode = sebagaiLayanan ? "layanan" : arg.Pengembangan ? "pengembangan" : "konsol";
 var cekAlat = new CekAlat(log);
@@ -174,17 +190,45 @@ rute.Get("/status", Asal.HalamanSendiri | Asal.Kiosk, () => Results.Json(new
     layanan = "jembatan-sidik-jari",
     versi,
     mode,
+    perangkat = brankas.Perangkat,
     waktu = DateTimeOffset.Now.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
     alat = cekAlat.Periksa(),
 }));
+
+// Detak kiosk: status alat menurut pemeriksaan jembatan sendiri, bukan
+// menurut halaman, ditandatangani bersama tantangan dari pemanggil.
+rute.Post("/detak", Asal.HalamanSendiri | Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanDetak>(permintaan);
+    if (galat is not null)
+    {
+        return galat;
+    }
+    if (!Brankas.TantanganSah(isi!.Tantangan))
+    {
+        return Galat(StatusCodes.Status400BadRequest, "Tantangan tidak sah.");
+    }
+    var alat = cekAlat.Periksa();
+    var terhubung = alat.Terhubung == true;
+    var tanda = brankas.TandatanganiDetak(isi.Tantangan!, terhubung);
+    return Results.Json(new
+    {
+        status = "ok",
+        perangkat = brankas.Perangkat,
+        alat = terhubung ? 1 : 0,
+        keterangan_alat = alat.Keterangan,
+        pesan = tanda.Pesan,
+        tanda_tangan = tanda.Hmac,
+    });
+});
 
 app.MapFallback(() => Results.Json(new { status = "error", message = "Rute tidak dikenal." },
     statusCode: StatusCodes.Status404NotFound));
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {
-    log.LogInformation("Jembatan sidik jari {Versi} berjalan sebagai {Mode} di http://127.0.0.1:{Port}. Folder data: {Folder}",
-        versi, mode, arg.Port, folderData);
+    log.LogInformation("Jembatan sidik jari {Versi}, perangkat {Perangkat}, berjalan sebagai {Mode} di http://127.0.0.1:{Port}. Folder data: {Folder}",
+        versi, brankas.Perangkat, mode, arg.Port, folderData);
     if (arg.Pengembangan)
     {
         log.LogWarning("MODE PENGEMBANGAN. Jangan dipakai di PC kiosk.");
@@ -193,6 +237,30 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 await app.RunAsync();
 return 0;
+
+static IResult Galat(int kode, string pesan) =>
+    Results.Json(new { status = "error", message = pesan }, statusCode: kode);
+
+// Isi kiriman JSON, atau jawaban galat yang siap dikirim. Kiriman lebih dari
+// batas Kestrel (2 MB) dijawab 413.
+static async Task<(T? Isi, IResult? Galat)> BacaJson<T>(HttpRequest permintaan) where T : class
+{
+    try
+    {
+        var isi = await permintaan.ReadFromJsonAsync<T>();
+        return isi is null ? (null, Galat(StatusCodes.Status400BadRequest, "Kiriman kosong.")) : (isi, null);
+    }
+    catch (JsonException)
+    {
+        return (null, Galat(StatusCodes.Status400BadRequest, "Kiriman bukan JSON yang sah."));
+    }
+    catch (Microsoft.AspNetCore.Http.BadHttpRequestException e)
+    {
+        return (null, Galat(e.StatusCode, e.StatusCode == StatusCodes.Status413PayloadTooLarge
+            ? "Kiriman terlalu besar."
+            : "Kiriman tidak bisa dibaca."));
+    }
+}
 
 // Siapa yang boleh memanggil sebuah rute.
 [Flags]
@@ -388,6 +456,8 @@ sealed class CekAlat(ILogger log)
 
 // Terhubung null berarti tidak bisa diperiksa.
 sealed record StatusAlat(bool? Terhubung, int Jumlah, string Keterangan);
+
+sealed record PermintaanDetak(string? Tantangan);
 
 sealed record Argumen(int Port, string? Data, bool Pengembangan)
 {
