@@ -1,0 +1,16 @@
+Windows Registry Editor Version 5.00
+
+; cabut-kebijakan-chrome.reg - mencabut kebijakan dari kebijakan-chrome.reg.
+;
+; Seluruh daftar LoopbackNetworkAllowedForUrls dihapus, di Chrome maupun
+; Edge. Setelah itu halaman kiosk kembali butuh izin pengguna untuk
+; mengakses 127.0.0.1.
+;
+; Cabut: klik dua kali berkas ini (butuh admin), atau dari Command Prompt
+;   admin: reg import cabut-kebijakan-chrome.reg
+; Berkas ini harus berakhir baris CRLF; .gitattributes menjaganya.
+
+[-HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\LoopbackNetworkAllowedForUrls]
+
+[-HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\LoopbackNetworkAllowedForUrls]
+

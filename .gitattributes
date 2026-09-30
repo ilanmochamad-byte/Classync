@@ -1,2 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Jembatan sidik jari. Di repositori tetap LF; yang diatur adalah bentuknya
+# di folder kerja, apa pun sistem operasinya:
+# - .reg dibaca regedit, yang butuh CRLF;
+# - uji.html dikunci CSP dengan hash isi skripnya, jadi akhir barisnya tidak
+#   boleh berubah menjadi CRLF saat di-checkout di Windows.
+jembatan/*.reg text eol=crlf
+jembatan/wwwroot/*.html text eol=lf

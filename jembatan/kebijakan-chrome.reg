@@ -1,0 +1,27 @@
+Windows Registry Editor Version 5.00
+
+; kebijakan-chrome.reg - izinkan halaman kiosk di https://smkt.alhasan.co.id
+; mengakses 127.0.0.1 (jembatan sidik jari dan HID Authentication Device
+; Client) tanpa permintaan izin Local Network Access.
+;
+; Sejak Chrome 142 (untuk WebSocket sejak 147), halaman publik yang mengakses
+; 127.0.0.1 butuh izin pengguna. Kebijakan di bawah memberi izin itu hanya
+; untuk satu asal, dan hanya ke perangkat ini sendiri (loopback), bukan ke
+; jaringan lokal.
+;
+; Berlaku untuk Chrome dan Edge versi 146 ke atas, di semua akun Windows.
+; Pasang: klik dua kali berkas ini (butuh admin), atau dari Command Prompt
+;   admin: reg import kebijakan-chrome.reg
+; Periksa: buka chrome://policy (atau edge://policy), klik "Reload policies",
+;   lalu pastikan LoopbackNetworkAllowedForUrls ada dan berstatus OK.
+; Cabut: cabut-kebijakan-chrome.reg.
+;
+; Nilai "1" ditimpa kalau kunci ini sudah berisi daftar lain.
+; Berkas ini harus berakhir baris CRLF; .gitattributes menjaganya.
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\LoopbackNetworkAllowedForUrls]
+"1"="https://smkt.alhasan.co.id"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\LoopbackNetworkAllowedForUrls]
+"1"="https://smkt.alhasan.co.id"
+

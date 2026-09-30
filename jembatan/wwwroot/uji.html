@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Halaman uji prototipe 4.1, disajikan jembatan di http://127.0.0.1:47890/.
+  Tidak ada yang dikirim ke server sekolah.
+
+  CSP: hanya jembatan ini, Authentication Device Client di 127.0.0.1 atau
+  localhost (WebSDK memakai https/http untuk berjabat tangan lalu ws/wss),
+  dan dua pustaka HID dari jsDelivr yang dikunci SRI. Hash di script-src
+  adalah SHA-256 isi elemen <script> terakhir di halaman ini. Kalau skrip itu
+  diubah, hash-nya harus dihitung ulang (lihat README.md), atau peramban
+  menolak menjalankannya.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-g06f8ZiJLr8jkuMdmOQSc+HP0I5fyu9qhsY5ikg0Dho=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
+<title>Uji jembatan sidik jari</title>
+<style>
+  :root { --biru: #1d4ed8; --hijau: #15803d; --merah: #b91c1c; --kuning: #a16207; --abu: #6b7280; --garis: #d1d5db; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #111827; background: #f8fafc; }
+  header { background: #0f172a; color: #fff; padding: 10px 16px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; color: #cbd5e1; font-size: 13px; }
+  main { padding: 12px 16px 40px; max-width: 1280px; margin: 0 auto; }
+  .kartu { background: #fff; border: 1px solid var(--garis); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .kisi { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #e5e7eb; padding: 4px 6px; text-align: left; vertical-align: top; font-size: 13px; }
+  th { color: var(--abu); font-weight: 600; }
+  td { word-break: break-word; }
+  .tab { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; }
+  .tab button[aria-selected="true"] { background: var(--biru); color: #fff; border-color: var(--biru); }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--garis); border-radius: 6px; background: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.bahaya { border-color: var(--merah); color: var(--merah); }
+  select, input[type=text] { font: inherit; padding: 5px 8px; border: 1px solid var(--garis); border-radius: 6px; }
+  .ok { color: var(--hijau); }
+  .galat { color: var(--merah); }
+  .peringatan { color: var(--kuning); }
+  .redup { color: var(--abu); }
+  .hasil-besar { font-size: 28px; font-weight: 700; margin: 8px 0; }
+  .baris { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; background: #0b1020; color: #e5e7eb; border-radius: 6px; padding: 8px; height: 200px; overflow: auto; white-space: pre-wrap; }
+  .log .ok { color: #86efac; }
+  .log .galat { color: #fca5a5; }
+  .log .peringatan { color: #fde68a; }
+  .slot { display: inline-block; width: 124px; margin: 0 8px 8px 0; text-align: center; font-size: 12px; }
+  .slot canvas, .slot img, .slot-kosong { width: 120px; height: 120px; object-fit: contain; border: 1px solid var(--garis); background: #fff; }
+  .slot-kosong { display: flex; align-items: center; justify-content: center; color: #94a3b8; border-style: dashed; }
+  #gambar-tangkap canvas, #gambar-tangkap img { max-width: 260px; border: 1px solid var(--garis); background: #fff; }
+  textarea { width: 100%; height: 280px; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Uji jembatan sidik jari — prototipe 4.1</h1>
+  <p>Klik halaman ini sebelum menempelkan jari: WebSDK hanya mengirim sampel ke jendela yang sedang aktif. Relawan dicatat dengan kode (R1, R2, …), bukan nama.</p>
+</header>
+<main>
+  <section class="kisi">
+    <div class="kartu">
+      <h2>Jembatan</h2>
+      <table id="tabel-jembatan"><tbody></tbody></table>
+      <div class="baris"><button id="muat-status">Muat ulang</button></div>
+    </div>
+    <div class="kartu">
+      <h2>Authentication Device Client</h2>
+      <table id="tabel-adc"><tbody></tbody></table>
+      <div class="baris">
+        <label>Format
+          <select id="format">
+            <option value="raw">Raw</option>
+            <option value="png">PNG</option>
+          </select>
+        </label>
+        <button id="mulai-tangkap">Mulai tangkap</button>
+        <button id="henti-tangkap">Hentikan</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="kartu" id="panel-pengembangan" hidden>
+    <h2 class="peringatan">Mode pengembangan: sampel dari berkas</h2>
+    <p class="redup">Hanya tampil kalau jembatan berjalan dengan --pengembangan. Berkas PNG diperlakukan seperti sampel dari alat, dalam format yang dipilih di atas.</p>
+    <div class="baris"><input type="file" id="berkas-uji" accept="image/png" multiple></div>
+  </div>
+
+  <nav class="tab" role="tablist">
+    <button data-tab="tangkap" aria-selected="true">Tangkap</button>
+    <button data-tab="daftar" aria-selected="false">Daftar</button>
+    <button data-tab="identifikasi" aria-selected="false">Identifikasi</button>
+    <button data-tab="kalibrasi" aria-selected="false">Kalibrasi &amp; ukur</button>
+    <button data-tab="detak" aria-selected="false">Detak</button>
+    <button data-tab="laporan" aria-selected="false">Laporan</button>
+  </nav>
+
+  <section class="kartu" data-tab="tangkap">
+    <h2>Tangkap: periksa format sampel</h2>
+    <p class="redup">Tempelkan jari beberapa kali dengan format Raw, lalu dengan PNG. Untuk laporan hanya ukuran dan metadatanya yang dicatat, bukan gambarnya.</p>
+    <div id="gambar-tangkap"></div>
+    <table id="tabel-tangkap"><tbody></tbody></table>
+    <p id="jumlah-tangkap" class="redup"></p>
+  </section>
+
+  <section class="kartu" data-tab="daftar" hidden>
+    <h2>Daftar relawan</h2>
+    <div class="baris">
+      <label>Relawan
+        <select id="relawan">
+          <option>R1</option><option>R2</option><option>R3</option>
+          <option>R4</option><option>R5</option><option>R6</option>
+        </select>
+      </label>
+      <label>Jari
+        <select id="jari">
+          <option value="TK">Telunjuk kanan</option>
+          <option value="TI">Telunjuk kiri</option>
+          <option value="GK">Tengah kanan</option>
+          <option value="GI">Tengah kiri</option>
+          <option value="MK">Manis kanan</option>
+          <option value="MI">Manis kiri</option>
+        </select>
+      </label>
+      <span id="identitas-daftar" class="redup"></span>
+      <button id="kosongkan-daftar">Kosongkan tempelan</button>
+    </div>
+    <p class="redup">Tempelkan jari yang sama empat kali, dengan posisi sedikit berbeda. Setelah tempelan keempat, pendaftaran dikirim otomatis.</p>
+    <div id="slot-daftar"></div>
+    <p id="hasil-daftar"></p>
+    <table id="tabel-galeri"></table>
+  </section>
+
+  <section class="kartu" data-tab="identifikasi" hidden>
+    <h2>Identifikasi 1:N</h2>
+    <div class="baris">
+      <label>Yang menempel sekarang <select id="harap"></select></label>
+      <button id="kirim-ulang">Kirim ulang sampel terakhir</button>
+    </div>
+    <p class="redup">Pilih jari yang akan ditempel sebelum menempel, supaya hitungan di bawah benar. Untuk jari yang tidak didaftarkan (jempol, kelingking), pilih "Jari tidak terdaftar".</p>
+    <div id="hasil-identifikasi" class="hasil-besar redup">Tempelkan jari.</div>
+    <p id="rincian-identifikasi" class="redup"></p>
+    <table id="tabel-hitungan"><tbody></tbody></table>
+  </section>
+
+  <section class="kartu" data-tab="kalibrasi" hidden>
+    <h2>Kalibrasi DPI dan ukur waktu</h2>
+    <div class="baris">
+      <button id="hitung-kalibrasi">Hitung kalibrasi</button>
+      <label>DPI
+        <select id="dpi-terapkan">
+          <option>500</option><option>512</option><option>600</option><option>700</option><option>800</option>
+        </select>
+      </label>
+      <button id="terapkan-dpi">Terapkan DPI</button>
+      <button id="ukur">Ukur waktu 1:N</button>
+    </div>
+    <p class="redup">Kalibrasi memakai gambar pendaftaran sesi ini, yang hanya ada di memori jembatan. Jalankan sebelum jembatan dimulai ulang.</p>
+    <table id="tabel-kalibrasi"></table>
+    <table id="tabel-ukur"></table>
+    <p id="catatan-ukur" class="redup"></p>
+  </section>
+
+  <section class="kartu" data-tab="detak" hidden>
+    <h2>Detak</h2>
+    <div class="baris">
+      <button id="detak-sekarang">Detak sekarang</button>
+      <label><input type="checkbox" id="detak-otomatis"> Otomatis tiap 60 detik</label>
+    </div>
+    <table id="tabel-detak"><tbody></tbody></table>
+  </section>
+
+  <section class="kartu" data-tab="laporan" hidden>
+    <h2>Laporan</h2>
+    <p class="redup">Isinya hanya angka dan metadata: tanpa gambar, templat, kunci, atau nama. Susun, salin, lalu kirim ke Claude.</p>
+    <div class="baris">
+      <button id="susun-laporan">Susun laporan</button>
+      <button id="salin-laporan">Salin</button>
+      <button id="hapus-uji" class="bahaya">Hapus semua data uji</button>
+    </div>
+    <textarea id="laporan" readonly></textarea>
+  </section>
+
+  <div class="kartu">
+    <h2>Catatan kejadian</h2>
+    <div id="log" class="log"></div>
+  </div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@digitalpersona/websdk@1.1.0/dist/websdk.client.ui.min.js" integrity="sha384-baRwCaY+UWsnD5MrvOeGa2cLyPxQw83DBbM0dDtUTgbmOArOkLNpjekYNmh0/b8v" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@digitalpersona/fingerprint@1.0.0/dist/fingerprint.sdk.min.js" integrity="sha384-qRaj7EcnkG9xEa3GLDSbuyk3KyMMkHjczUC91bAkIoD2OoTfONS08AfRMX7I+fxl" crossorigin="anonymous"></script>
+<script>
+'use strict';
+(async () => {
+  const VERSI_HALAMAN = '0.1.0';
+  const $ = (pemilih) => document.querySelector(pemilih);
+
+  // ---------- Catatan untuk laporan dan log di layar ----------
+
+  const laporan = {
+    tangkap: [], daftar: [], identifikasi: [], sampel_kembar: [],
+    kalibrasi: null, penerapan_dpi: [], ukur: null,
+    detak: { ok: 0, gagal: 0, alat_1: 0, alat_0: 0, terakhir: null },
+    csp_dilanggar: [], galat: [],
+  };
+
+  function catat(teks, jenis) {
+    const baris = document.createElement('div');
+    baris.textContent = new Date().toLocaleTimeString('id-ID', { hour12: false }) + '  ' + teks;
+    if (jenis) baris.className = jenis;
+    const wadah = $('#log');
+    wadah.prepend(baris);
+    while (wadah.childNodes.length > 300) wadah.lastChild.remove();
+    if (jenis === 'galat') laporan.galat.push({ waktu: new Date().toISOString(), pesan: teks });
+  }
+
+  window.addEventListener('error', (e) => catat('Galat skrip: ' + e.message, 'galat'));
+  window.addEventListener('unhandledrejection', (e) => catat('Galat skrip: ' + (e.reason?.message ?? e.reason), 'galat'));
+  document.addEventListener('securitypolicyviolation', (e) => {
+    laporan.csp_dilanggar.push({ arahan: e.violatedDirective, diblokir: e.blockedURI });
+    catat('CSP memblokir ' + e.blockedURI + ' (' + e.violatedDirective + ')', 'galat');
+  });
+
+  // ---------- Tampilan ----------
+
+  function sel(isi, kelas) {
+    const td = document.createElement('td');
+    td.textContent = isi === null || isi === undefined || isi === '' ? '—' : String(isi);
+    if (kelas) td.className = kelas;
+    return td;
+  }
+
+  // baris: [[label, nilai, kelas], ...]
+  function isiTabel(tbody, baris) {
+    tbody.replaceChildren(...baris.map(([label, nilai, kelas]) => {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th');
+      th.textContent = label;
+      tr.append(th, sel(nilai, kelas));
+      return tr;
+    }));
+  }
+
+  function tabelKolom(tabel, kepala, baris) {
+    const thead = document.createElement('thead');
+    const trKepala = document.createElement('tr');
+    for (const k of kepala) {
+      const th = document.createElement('th');
+      th.textContent = k;
+      trKepala.append(th);
+    }
+    thead.append(trKepala);
+    const tbody = document.createElement('tbody');
+    for (const b of baris) {
+      const tr = document.createElement('tr');
+      tr.append(...b.map((nilai) => sel(nilai)));
+      tbody.append(tr);
+    }
+    tabel.replaceChildren(thead, tbody);
+  }
+
+  // Tombol berbahaya: klik pertama hanya meminta kepastian selama 5 detik.
+  function konfirmasiDuaKali(tombol, aksi) {
+    const label = tombol.textContent;
+    let siap = false;
+    let pewaktu = null;
+    tombol.addEventListener('click', async () => {
+      if (!siap) {
+        siap = true;
+        tombol.textContent = 'Yakin? Klik sekali lagi';
+        pewaktu = setTimeout(() => { siap = false; tombol.textContent = label; }, 5000);
+        return;
+      }
+      clearTimeout(pewaktu);
+      siap = false;
+      tombol.textContent = label;
+      await aksi();
+    });
+  }
+
+  // ---------- Jembatan ----------
+
+  async function panggil(metode, rute, isi) {
+    const opsi = { method: metode, headers: {} };
+    if (isi !== undefined) {
+      opsi.headers['Content-Type'] = 'application/json';
+      opsi.body = JSON.stringify(isi);
+    }
+    try {
+      const jawaban = await fetch(rute, opsi);
+      let data = null;
+      try { data = await jawaban.json(); } catch { /* bukan JSON */ }
+      return { kode: jawaban.status, data };
+    } catch (err) {
+      catat('Jembatan tidak bisa dihubungi: ' + err.message, 'galat');
+      return { kode: 0, data: null };
+    }
+  }
+
+  function tantangan() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  let statusJembatan = null;
+  async function muatStatus() {
+    const { kode, data } = await panggil('GET', '/status');
+    if (kode !== 200 || !data) {
+      isiTabel($('#tabel-jembatan tbody'), [['Keadaan', 'Tidak terhubung', 'galat']]);
+      return;
+    }
+    statusJembatan = data;
+    const g = data.galeri ?? {};
+    const a = data.alat ?? {};
+    isiTabel($('#tabel-jembatan tbody'), [
+      ['Versi', data.versi],
+      ['Mode', data.mode, data.mode === 'pengembangan' ? 'peringatan' : ''],
+      ['Perangkat', data.perangkat],
+      ['Waktu PC', data.waktu],
+      ['Alat menurut Windows', a.keterangan, a.terhubung === true ? 'ok' : a.terhubung === false ? 'galat' : 'redup'],
+      ['Galeri', `${g.identitas} identitas, ${g.templat} templat, DPI ${g.dpi}`
+        + (g.rekaman_tertolak ? `, ${g.rekaman_tertolak} rekaman tertolak` : ''), g.rekaman_tertolak ? 'galat' : ''],
+    ]);
+    const pengembangan = data.mode === 'pengembangan';
+    $('#panel-pengembangan').hidden = !pengembangan;
+    if (pengembangan && !window.ujiPengembangan) {
+      // Pengait untuk uji otomatis di Mac. Tidak ada di luar mode pengembangan.
+      window.ujiPengembangan = {
+        dariUrl: async (url) => sampelDariBerkas(await (await fetch(url)).blob(), url),
+        bukaTab,
+        pilih: (pemilih, nilai) => { $(pemilih).value = nilai; $(pemilih).dispatchEvent(new Event('change')); },
+      };
+    }
+  }
+
+  let galeri = [];
+  async function muatGaleri() {
+    const { kode, data } = await panggil('GET', '/galeri');
+    if (kode !== 200 || !data) return;
+    galeri = data.jari ?? [];
+    tabelKolom($('#tabel-galeri'), ['Identitas', 'Jari', 'Tempelan', 'Gambar di memori'],
+      galeri.map((j) => [j.identitas, j.jari, j.tempelan, j.gambar_di_memori ? 'ya' : 'tidak']));
+    const pilihan = $('#harap');
+    const sebelumnya = pilihan.value;
+    const opsi = [['', '— pilih —'], ...[...new Set(galeri.map((j) => j.identitas))].map((i) => [i, i]), ['ASING', 'Jari tidak terdaftar']];
+    pilihan.replaceChildren(...opsi.map(([nilai, teks]) => {
+      const o = document.createElement('option');
+      o.value = nilai;
+      o.textContent = teks;
+      return o;
+    }));
+    if ([...pilihan.options].some((o) => o.value === sebelumnya)) pilihan.value = sebelumnya;
+  }
+
+  // ---------- Authentication Device Client (WebSDK HID) ----------
+
+  const adc = { terhubung: null, komunikasi_gagal: 0, pembaca: [], menangkap: false, format: 'raw', kualitas: null };
+  let api = null;
+
+  function tampilkanAdc() {
+    isiTabel($('#tabel-adc tbody'), [
+      ['Koneksi', adc.terhubung === null ? 'Menghubungkan…' : adc.terhubung ? 'Terhubung' : 'Tidak terhubung',
+        adc.terhubung ? 'ok' : adc.terhubung === false ? 'galat' : 'redup'],
+      ['Pembaca', adc.pembaca.length ? adc.pembaca.map((p) => `${p.uid} (${p.teknologi ?? '?'}, ${p.modalitas ?? '?'})`).join('; ') : 'Tidak ada',
+        adc.pembaca.length ? 'ok' : 'galat'],
+      ['Penangkapan', adc.menangkap ? 'Aktif, format ' + adc.format : 'Tidak aktif'],
+      ['Kualitas terakhir', adc.kualitas],
+    ]);
+  }
+
+  function mulaiAdc() {
+    if (typeof Fingerprint === 'undefined' || typeof WebSdk === 'undefined') {
+      adc.terhubung = false;
+      tampilkanAdc();
+      catat('Pustaka WebSDK tidak termuat: jsDelivr tidak terjangkau, atau SRI tidak cocok.', 'galat');
+      return;
+    }
+    api = new Fingerprint.WebApi();
+    api.onCommunicationFailed = () => {
+      adc.komunikasi_gagal++;
+      if (adc.terhubung !== false) catat('Tidak bisa terhubung ke Authentication Device Client.', 'galat');
+      adc.terhubung = false;
+      adc.menangkap = false;
+      tampilkanAdc();
+    };
+    api.onDeviceConnected = (e) => { catat('Pembaca terhubung: ' + e.deviceUid, 'ok'); muatPembaca(); };
+    api.onDeviceDisconnected = (e) => { catat('Pembaca terputus: ' + e.deviceUid, 'galat'); muatPembaca(); };
+    api.onAcquisitionStarted = () => { adc.menangkap = true; catat('Penangkapan dimulai, format ' + adc.format + '.'); tampilkanAdc(); };
+    api.onAcquisitionStopped = () => { adc.menangkap = false; catat('Penangkapan berhenti.'); tampilkanAdc(); };
+    api.onQualityReported = (e) => {
+      adc.kualitas = Fingerprint.QualityCode[e.quality] ?? String(e.quality);
+      if (e.quality !== Fingerprint.QualityCode.Good) catat('Kualitas tempelan: ' + adc.kualitas, 'peringatan');
+      tampilkanAdc();
+    };
+    api.onErrorOccurred = (e) => catat('Galat pembaca: kode ' + e.error, 'galat');
+    api.onSamplesAcquired = terimaSampelAlat;
+    muatPembaca();
+  }
+
+  async function muatPembaca() {
+    try {
+      const daftarUid = await api.enumerateDevices();
+      adc.terhubung = true;
+      adc.pembaca = await Promise.all(daftarUid.map(async (uid) => {
+        try {
+          const info = await api.getDeviceInfo(uid);
+          return {
+            uid,
+            teknologi: Fingerprint.DeviceTechnology[info.eDeviceTech],
+            modalitas: Fingerprint.DeviceModality[info.eDeviceModality],
+            jenis_uid: Fingerprint.DeviceUidType[info.eUidType],
+          };
+        } catch (err) {
+          return { uid, galat: err.message ?? String(err) };
+        }
+      }));
+      tampilkanAdc();
+      if (adc.pembaca.length > 0 && !adc.menangkap) await mulaiTangkap();
+    } catch (err) {
+      adc.terhubung = false;
+      tampilkanAdc();
+      catat('Daftar pembaca tidak bisa dibaca: ' + (err.message ?? err), 'galat');
+    }
+  }
+
+  async function mulaiTangkap() {
+    if (!api) return;
+    const format = $('#format').value;
+    try {
+      if (adc.menangkap) await api.stopAcquisition();
+      adc.format = format;
+      await api.startAcquisition(format === 'raw' ? Fingerprint.SampleFormat.Raw : Fingerprint.SampleFormat.PngImage);
+      adc.menangkap = true;
+      tampilkanAdc();
+    } catch (err) {
+      catat('Penangkapan tidak bisa dimulai: ' + (err.message ?? err), 'galat');
+    }
+  }
+
+  async function hentiTangkap() {
+    if (!api) return;
+    try {
+      await api.stopAcquisition();
+      adc.menangkap = false;
+      tampilkanAdc();
+    } catch (err) {
+      catat('Penangkapan tidak bisa dihentikan: ' + (err.message ?? err), 'galat');
+    }
+  }
+
+  // ---------- Sampel ----------
+
+  function b64urlKeBytes(teks) {
+    let b64 = teks.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const biner = atob(b64);
+    const bytes = new Uint8Array(biner.length);
+    for (let i = 0; i < biner.length; i++) bytes[i] = biner.charCodeAt(i);
+    return bytes;
+  }
+
+  function bytesKeB64(bytes) {
+    let biner = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) biner += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(biner);
+  }
+
+  const bytesKeB64url = (bytes) => bytesKeB64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  function kanvasDariPiksel(piksel, lebar, tinggi) {
+    const kanvas = document.createElement('canvas');
+    kanvas.width = lebar;
+    kanvas.height = tinggi;
+    const ctx = kanvas.getContext('2d');
+    const gambar = ctx.createImageData(lebar, tinggi);
+    for (let i = 0; i < piksel.length && i < lebar * tinggi; i++) {
+      gambar.data[4 * i] = gambar.data[4 * i + 1] = gambar.data[4 * i + 2] = piksel[i];
+      gambar.data[4 * i + 3] = 255;
+    }
+    ctx.putImageData(gambar, 0, 0);
+    return kanvas;
+  }
+
+  // Raw dari WebSDK: BioSample {Header, Data, Version}. Data adalah base64url
+  // dari JSON {Data: piksel base64url, Format: {iWidth, iHeight, iXdpi, ...}}.
+  // Yang dikirim ke jembatan adalah Data itu apa adanya; jembatan membacanya
+  // sendiri. Halaman hanya membukanya untuk ditampilkan dan dicatat.
+  function sampelRaw(bio) {
+    const dalam = JSON.parse(new TextDecoder().decode(b64urlKeBytes(bio.Data)));
+    const format = dalam.Format ?? {};
+    const piksel = b64urlKeBytes(dalam.Data);
+    return {
+      format: 'raw',
+      teks: bio.Data,
+      lebar: format.iWidth ?? null,
+      tinggi: format.iHeight ?? null,
+      dpi: format.iXdpi ?? null,
+      panjang_cocok: piksel.length === format.iWidth * format.iHeight,
+      kolom_format: format,
+      header: bio.Header ?? null,
+      gambar: () => kanvasDariPiksel(piksel, format.iWidth, format.iHeight),
+    };
+  }
+
+  // PNG dari WebSDK: base64url berkas PNG, diteruskan apa adanya.
+  function sampelPng(teks) {
+    const isi = teks.startsWith('data:') ? teks.slice(teks.indexOf(',') + 1) : teks;
+    const b64 = bytesKeB64(b64urlKeBytes(isi));
+    return {
+      format: 'png',
+      teks,
+      lebar: null,
+      tinggi: null,
+      dpi: null,
+      panjang_cocok: null,
+      kolom_format: null,
+      header: null,
+      gambar: () => {
+        const img = new Image();
+        img.src = 'data:image/png;base64,' + b64;
+        return img;
+      },
+    };
+  }
+
+  function terimaSampelAlat(e) {
+    const t0 = performance.now();
+    let sampel;
+    try {
+      const daftar = JSON.parse(e.samples);
+      if (e.sampleFormat === Fingerprint.SampleFormat.Raw) {
+        sampel = sampelRaw(daftar[0]);
+      } else if (e.sampleFormat === Fingerprint.SampleFormat.PngImage) {
+        sampel = sampelPng(daftar[0]);
+      } else {
+        catat('Format sampel ' + e.sampleFormat + ' tidak dipakai di uji ini.', 'peringatan');
+        return;
+      }
+    } catch (err) {
+      catat('Sampel dari alat tidak bisa dibaca halaman: ' + err.message, 'galat');
+      return;
+    }
+    sampel.t0 = t0;
+    sampel.asal = 'alat';
+    sampel.kualitas = adc.kualitas;
+    arahkan(sampel);
+  }
+
+  // Mode pengembangan: berkas PNG diubah menjadi sampel berbentuk sama dengan
+  // keluaran WebSDK, dalam format yang dipilih.
+  async function sampelDariBerkas(blob, nama) {
+    const format = $('#format').value;
+    let sampel;
+    if (format === 'png') {
+      sampel = sampelPng('data:image/png;base64,' + bytesKeB64(new Uint8Array(await blob.arrayBuffer())));
+    } else {
+      const bitmap = await createImageBitmap(blob);
+      const kanvas = document.createElement('canvas');
+      kanvas.width = bitmap.width;
+      kanvas.height = bitmap.height;
+      const ctx = kanvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, kanvas.width, kanvas.height);
+      ctx.drawImage(bitmap, 0, 0);
+      const rgba = ctx.getImageData(0, 0, kanvas.width, kanvas.height).data;
+      const piksel = new Uint8Array(kanvas.width * kanvas.height);
+      for (let i = 0; i < piksel.length; i++) {
+        piksel[i] = Math.round(0.299 * rgba[4 * i] + 0.587 * rgba[4 * i + 1] + 0.114 * rgba[4 * i + 2]);
+      }
+      const dalam = JSON.stringify({ Data: bytesKeB64url(piksel), Format: { iWidth: kanvas.width, iHeight: kanvas.height, iXdpi: 500, iYdpi: 500, iBpp: 8 } });
+      sampel = sampelRaw({ Data: bytesKeB64url(new TextEncoder().encode(dalam)), Header: null });
+    }
+    sampel.t0 = performance.now();
+    sampel.asal = 'berkas';
+    sampel.kualitas = null;
+    catat('Sampel pengembangan dari ' + nama + ' (' + format + ').', 'peringatan');
+    return arahkan(sampel);
+  }
+
+  let tabAktif = 'tangkap';
+
+  function arahkan(sampel) {
+    if (tabAktif === 'tangkap') return terimaTangkap(sampel);
+    if (tabAktif === 'daftar') return terimaDaftar(sampel);
+    if (tabAktif === 'identifikasi') return terimaIdentifikasi(sampel);
+    catat('Sampel diabaikan: buka tab Tangkap, Daftar, atau Identifikasi.', 'peringatan');
+  }
+
+  function bukaTab(nama) {
+    tabAktif = nama;
+    for (const t of document.querySelectorAll('.tab button')) t.setAttribute('aria-selected', String(t.dataset.tab === nama));
+    for (const s of document.querySelectorAll('section[data-tab]')) s.hidden = s.dataset.tab !== nama;
+    if (nama === 'daftar' || nama === 'identifikasi') muatGaleri();
+  }
+
+  // ---------- Tangkap ----------
+
+  function terimaTangkap(s) {
+    const catatan = {
+      waktu: new Date().toISOString(), asal: s.asal, format: s.format,
+      lebar: s.lebar, tinggi: s.tinggi, dpi: s.dpi, panjang_cocok: s.panjang_cocok,
+      kolom_format: s.kolom_format, header: s.header, kualitas: s.kualitas, panjang_teks: s.teks.length,
+    };
+    laporan.tangkap.push(catatan);
+    const elemen = s.gambar();
+    $('#gambar-tangkap').replaceChildren(elemen);
+    const tampil = () => {
+      isiTabel($('#tabel-tangkap tbody'), [
+        ['Format', catatan.format],
+        ['Ukuran', `${catatan.lebar ?? '?'} × ${catatan.tinggi ?? '?'}`],
+        ['DPI dari alat', catatan.dpi],
+        ['Panjang piksel = lebar × tinggi', catatan.panjang_cocok === null ? null : catatan.panjang_cocok ? 'ya' : 'TIDAK',
+          catatan.panjang_cocok === false ? 'galat' : ''],
+        ['Kolom Format', catatan.kolom_format ? JSON.stringify(catatan.kolom_format) : null],
+        ['Header BioSample', catatan.header ? JSON.stringify(catatan.header) : null],
+        ['Kualitas', catatan.kualitas],
+        ['Panjang teks sampel', catatan.panjang_teks],
+      ]);
+      const raw = laporan.tangkap.filter((x) => x.format === 'raw').length;
+      $('#jumlah-tangkap').textContent = `Sudah dicatat ${laporan.tangkap.length} sampel: ${raw} raw, ${laporan.tangkap.length - raw} png.`;
+    };
+    if (s.format === 'png') {
+      elemen.addEventListener('load', () => {
+        catatan.lebar = elemen.naturalWidth;
+        catatan.tinggi = elemen.naturalHeight;
+        tampil();
+      }, { once: true });
+    }
+    tampil();
+    catat(`Sampel ${catatan.format} dicatat.`, 'ok');
+  }
+
+  // ---------- Daftar ----------
+
+  const slot = [null, null, null, null];
+  let sibukDaftar = false;
+
+  const identitasDaftar = () => `uji:${$('#relawan').value}-${$('#jari').value}`;
+
+  function tampilkanSlot() {
+    $('#slot-daftar').replaceChildren(...slot.map((s, i) => {
+      const kotak = document.createElement('div');
+      kotak.className = 'slot';
+      if (s) {
+        kotak.append(s.gambar());
+      } else {
+        const kosong = document.createElement('div');
+        kosong.className = 'slot-kosong';
+        kosong.textContent = 'kosong';
+        kotak.append(kosong);
+      }
+      const label = document.createElement('div');
+      label.textContent = 'Tempelan ' + (i + 1);
+      kotak.append(label);
+      return kotak;
+    }));
+    $('#identitas-daftar').textContent = 'Identitas: ' + identitasDaftar();
+  }
+
+  function kosongkanSlot() {
+    slot.fill(null);
+    tampilkanSlot();
+  }
+
+  function terimaDaftar(s) {
+    if (sibukDaftar) {
+      catat('Sampel diabaikan: pendaftaran sedang diproses.', 'peringatan');
+      return;
+    }
+    const i = slot.findIndex((x) => x === null);
+    if (i < 0) return;
+    slot[i] = s;
+    tampilkanSlot();
+    catat(`Tempelan ${i + 1} untuk ${identitasDaftar()} diterima.`);
+    if (slot.every(Boolean)) return kirimDaftar();
+  }
+
+  async function kirimDaftar() {
+    const identitas = identitasDaftar();
+    const jari = $('#jari').value.toLowerCase();
+    const format = slot[0].format;
+    const hasil = $('#hasil-daftar');
+    if (!slot.every((x) => x.format === format)) {
+      catat('Keempat tempelan harus satu format. Tempelan dikosongkan.', 'galat');
+      kosongkanSlot();
+      return;
+    }
+    sibukDaftar = true;
+    hasil.textContent = 'Mendaftarkan ' + identitas + '…';
+    hasil.className = 'redup';
+    const { kode, data } = await panggil('POST', '/daftar', { identitas, jari, format, sampel: slot.map((x) => x.teks) });
+    sibukDaftar = false;
+    laporan.daftar.push({
+      waktu: new Date().toISOString(), identitas, jari, format, kode,
+      pesan: data?.message ?? null,
+      skor_keserasian: data?.skor_keserasian ?? data?.rincian?.skor_keserasian ?? null,
+      skor_jari_lain_tertinggi: data?.skor_jari_lain_tertinggi ?? data?.rincian?.skor ?? null,
+      identitas_lain: data?.rincian?.identitas_lain ?? null,
+      diganti: data?.diganti ?? null,
+      waktu_ms: data?.waktu_ms ?? null,
+      sampel: data?.sampel ?? null,
+    });
+    if (kode === 200) {
+      hasil.textContent = `Terdaftar: ${identitas}. Keserasian ${data.skor_keserasian.join(', ')}; jari lain tertinggi ${data.skor_jari_lain_tertinggi}.`;
+      hasil.className = 'ok';
+      catat('Pendaftaran ' + identitas + ' berhasil.', 'ok');
+      kosongkanSlot();
+      await muatGaleri();
+      await muatStatus();
+    } else if (kode === 422 && data?.rincian?.tempelan_lemah) {
+      hasil.textContent = `${data.message} Keserasian: ${data.rincian.skor_keserasian.join(', ')}.`;
+      hasil.className = 'galat';
+      for (const k of data.rincian.tempelan_lemah) slot[k - 1] = null;
+      tampilkanSlot();
+    } else {
+      hasil.textContent = (data?.message ?? `Pendaftaran gagal (${kode}).`) + ' Keempat tempelan dikosongkan.';
+      hasil.className = 'galat';
+      kosongkanSlot();
+    }
+  }
+
+  // ---------- Identifikasi ----------
+
+  let sibukIdentifikasi = false;
+  let sampelTerakhir = null;
+  const hitungan = { tempelan: 0, benar: 0, salah_orang: 0, tidak_dikenali: 0, asing_ditolak: 0, asing_diterima: 0, tanpa_pilihan: 0, galat: 0 };
+  // Satu percobaan: tempelan berturut-turut untuk jari yang sama, sampai
+  // dikenali, salah orang, atau tiga kali gagal.
+  const percobaan = { dikenali_ke_1: 0, dikenali_ke_2: 0, dikenali_ke_3: 0, gagal_3_kali: 0, salah_orang: 0, ditinggalkan: 0 };
+  let percobaanAktif = null;
+
+  async function terimaIdentifikasi(s) {
+    if (sibukIdentifikasi) {
+      catat('Sampel diabaikan: identifikasi sebelumnya belum selesai.', 'peringatan');
+      return;
+    }
+    sibukIdentifikasi = true;
+    const harap = $('#harap').value || null;
+    const { kode, data } = await panggil('POST', '/identifikasi', { format: s.format, sampel: s.teks, tantangan: tantangan() });
+    const ujungKeUjung = Math.round((performance.now() - s.t0) * 10) / 10;
+    sibukIdentifikasi = false;
+    sampelTerakhir = s;
+    tampilkanIdentifikasi(kode, data, harap, ujungKeUjung, s);
+  }
+
+  function tampilkanIdentifikasi(kode, data, harap, ujungKeUjung, s) {
+    const besar = $('#hasil-identifikasi');
+    const rinci = $('#rincian-identifikasi');
+    hitungan.tempelan++;
+    const catatan = {
+      ke: hitungan.tempelan, waktu: new Date().toISOString(), asal: s.asal, format: s.format, harap, kode,
+      diterima: data?.diterima ?? null, identitas: data?.identitas ?? null, skor: data?.skor ?? null,
+      kandidat: data?.kandidat ?? null, waktu_jembatan_ms: data?.waktu_ms ?? null, ujung_ke_ujung_ms: ujungKeUjung,
+      pesan: kode === 200 ? null : data?.message ?? null,
+    };
+    if (kode !== 200) {
+      hitungan.galat++;
+      besar.textContent = 'Galat ' + kode;
+      besar.className = 'hasil-besar galat';
+      rinci.textContent = data?.message ?? '';
+    } else {
+      const kandidat = data.kandidat ?? [];
+      catatan.skor_jari_ini = harap && harap !== 'ASING' ? (kandidat.find((k) => k.identitas === harap)?.skor ?? null) : null;
+      catatan.skor_lain_tertinggi = kandidat.find((k) => k.identitas !== harap)?.skor ?? null;
+      if (data.diterima) {
+        besar.textContent = `✔ ${data.identitas}  (skor ${data.skor})`;
+        besar.className = 'hasil-besar ok';
+      } else {
+        besar.textContent = `✘ Tidak dikenali  (skor terbaik ${data.skor})`;
+        besar.className = 'hasil-besar galat';
+      }
+      rinci.textContent = `Kandidat: ${kandidat.map((k) => k.identitas + ' ' + k.skor).join(', ')} · jembatan ${data.waktu_ms.total} ms `
+        + `(ekstraksi ${data.waktu_ms.ekstraksi}, cocok ${data.waktu_ms.cocok}) · ujung ke ujung ${ujungKeUjung} ms · `
+        + `${data.sampel.format} ${data.sampel.lebar}×${data.sampel.tinggi}, DPI galeri ${data.dpi}`;
+      hitung(harap, data);
+    }
+    laporan.identifikasi.push(catatan);
+    tampilkanHitungan();
+  }
+
+  function hitung(harap, data) {
+    if (percobaanAktif && percobaanAktif.harap !== harap) {
+      percobaan.ditinggalkan++;
+      percobaanAktif = null;
+    }
+    if (!harap) {
+      hitungan.tanpa_pilihan++;
+      return;
+    }
+    if (harap === 'ASING') {
+      if (data.diterima) hitungan.asing_diterima++; else hitungan.asing_ditolak++;
+      return;
+    }
+    const benar = data.diterima && data.identitas === harap;
+    if (benar) hitungan.benar++; else if (data.diterima) hitungan.salah_orang++; else hitungan.tidak_dikenali++;
+    percobaanAktif ??= { harap, ke: 0 };
+    percobaanAktif.ke++;
+    if (benar) {
+      percobaan['dikenali_ke_' + percobaanAktif.ke]++;
+      percobaanAktif = null;
+    } else if (data.diterima) {
+      percobaan.salah_orang++;
+      percobaanAktif = null;
+    } else if (percobaanAktif.ke >= 3) {
+      percobaan.gagal_3_kali++;
+      percobaanAktif = null;
+    }
+  }
+
+  function tampilkanHitungan() {
+    const persen = (a, b) => (b ? Math.round((a / b) * 1000) / 10 + '%' : '—');
+    const terdaftar = hitungan.benar + hitungan.salah_orang + hitungan.tidak_dikenali;
+    const selesai = percobaan.dikenali_ke_1 + percobaan.dikenali_ke_2 + percobaan.dikenali_ke_3 + percobaan.gagal_3_kali + percobaan.salah_orang;
+    const dalamTiga = percobaan.dikenali_ke_1 + percobaan.dikenali_ke_2 + percobaan.dikenali_ke_3;
+    isiTabel($('#tabel-hitungan tbody'), [
+      ['Tempelan', hitungan.tempelan],
+      ['Jari terdaftar: benar', `${hitungan.benar} dari ${terdaftar} (${persen(hitungan.benar, terdaftar)})`],
+      ['Jari terdaftar: SALAH ORANG', hitungan.salah_orang, hitungan.salah_orang ? 'galat' : ''],
+      ['Jari terdaftar: tidak dikenali', hitungan.tidak_dikenali],
+      ['Jari tidak terdaftar: ditolak', hitungan.asing_ditolak],
+      ['Jari tidak terdaftar: DITERIMA', hitungan.asing_diterima, hitungan.asing_diterima ? 'galat' : ''],
+      ['Percobaan: dikenali pada tempelan pertama', `${percobaan.dikenali_ke_1} dari ${selesai} (${persen(percobaan.dikenali_ke_1, selesai)})`],
+      ['Percobaan: dikenali dalam tiga tempelan', `${dalamTiga} dari ${selesai} (${persen(dalamTiga, selesai)})`],
+      ['Percobaan: gagal tiga kali', percobaan.gagal_3_kali],
+      ['Tanpa pilihan "yang menempel"', hitungan.tanpa_pilihan],
+      ['Galat', hitungan.galat, hitungan.galat ? 'galat' : ''],
+    ]);
+  }
+
+  async function kirimUlang() {
+    if (!sampelTerakhir) {
+      catat('Belum ada sampel identifikasi untuk dikirim ulang.', 'peringatan');
+      return;
+    }
+    const { kode, data } = await panggil('POST', '/identifikasi', { format: sampelTerakhir.format, sampel: sampelTerakhir.teks, tantangan: tantangan() });
+    const ditolak = kode === 409;
+    laporan.sampel_kembar.push({ waktu: new Date().toISOString(), kode, ditolak, pesan: data?.message ?? null });
+    catat(ditolak ? 'Sampel kembar ditolak jembatan (409), sesuai harapan.' : 'SAMPEL KEMBAR TIDAK DITOLAK: jawaban ' + kode, ditolak ? 'ok' : 'galat');
+  }
+
+  // ---------- Kalibrasi dan ukur ----------
+
+  async function hitungKalibrasi() {
+    const tombol = $('#hitung-kalibrasi');
+    tombol.disabled = true;
+    catat('Kalibrasi berjalan; bisa beberapa puluh detik.');
+    const { kode, data } = await panggil('POST', '/kalibrasi', {});
+    tombol.disabled = false;
+    if (kode !== 200) {
+      catat('Kalibrasi: ' + (data?.message ?? kode), 'galat');
+      return;
+    }
+    laporan.kalibrasi = data;
+    tabelKolom($('#tabel-kalibrasi'),
+      ['DPI', 'Sama-jari terendah', 'p5', 'Median', '< 40', '< 50', '< 60', 'Beda-jari tertinggi', 'p99', '≥ 40', '≥ 50', '≥ 60', 'Jarak'],
+      data.hasil.map((h) => [h.dpi, h.sama_jari.terendah, h.sama_jari.p5, h.sama_jari.median, h.sama_jari.di_bawah_40,
+        h.sama_jari.di_bawah_50, h.sama_jari.di_bawah_60, h.beda_jari.tertinggi, h.beda_jari.p99, h.beda_jari.di_atas_40,
+        h.beda_jari.di_atas_50, h.beda_jari.di_atas_60, h.jarak]));
+    catat(`Kalibrasi selesai: ${data.gambar} gambar dari ${data.identitas} identitas; DPI sekarang ${data.dpi_sekarang}.`, 'ok');
+  }
+
+  async function terapkanDpi() {
+    const dpi = Number($('#dpi-terapkan').value);
+    const { kode, data } = await panggil('POST', '/kalibrasi', { terapkan: dpi });
+    laporan.penerapan_dpi.push({ waktu: new Date().toISOString(), dpi, kode, pesan: data?.message ?? null });
+    catat(kode === 200 ? `DPI galeri kini ${dpi}; ${data.templat} templat diekstrak ulang.` : 'Terapkan DPI: ' + (data?.message ?? kode),
+      kode === 200 ? 'ok' : 'galat');
+    await muatStatus();
+    await muatGaleri();
+  }
+
+  async function ukur() {
+    const tombol = $('#ukur');
+    tombol.disabled = true;
+    catat('Pengukuran waktu berjalan; bisa sampai beberapa puluh detik.');
+    const { kode, data } = await panggil('POST', '/ukur', {});
+    tombol.disabled = false;
+    if (kode !== 200) {
+      catat('Ukur: ' + (data?.message ?? kode), 'galat');
+      return;
+    }
+    laporan.ukur = data;
+    tabelKolom($('#tabel-ukur'), ['Templat di galeri', 'Median (ms)', 'p95 (ms)', 'Terendah', 'Tertinggi'],
+      data.pencocokan.map((p) => [p.templat, p.median_ms, p.p95_ms, p.terendah_ms, p.tertinggi_ms]));
+    const e = data.ekstraksi;
+    $('#catatan-ukur').textContent = `Ekstraksi ${e ? `${e.format}: median ${e.median_ms} ms, p95 ${e.p95_ms} ms` : '—'} · `
+      + `${data.templat_nyata} templat nyata, DPI ${data.dpi} · ${data.mesin.os}, ${data.mesin.prosesor} prosesor, ${data.mesin.dotnet}. ${data.catatan}`;
+    catat('Pengukuran selesai.', 'ok');
+  }
+
+  // ---------- Detak ----------
+
+  let alatSebelumnya = null;
+  let pewaktuDetak = null;
+
+  async function detak() {
+    const t = tantangan();
+    const { kode, data } = await panggil('POST', '/detak', { tantangan: t });
+    const d = laporan.detak;
+    if (kode === 200 && data?.pesan?.includes('|' + t + '|')) {
+      d.ok++;
+      if (data.alat === 1) d.alat_1++; else d.alat_0++;
+      d.terakhir = { waktu: new Date().toISOString(), alat: data.alat, keterangan_alat: data.keterangan_alat, pesan: data.pesan };
+      if (alatSebelumnya !== null && alatSebelumnya !== data.alat) {
+        catat('Alat menurut jembatan: ' + data.keterangan_alat, data.alat === 1 ? 'ok' : 'galat');
+      }
+      alatSebelumnya = data.alat;
+    } else {
+      d.gagal++;
+      catat('Detak gagal: ' + (data?.message ?? kode), 'galat');
+    }
+    isiTabel($('#tabel-detak tbody'), [
+      ['Berhasil', d.ok],
+      ['Gagal', d.gagal, d.gagal ? 'galat' : ''],
+      ['Alat terhubung / tidak', `${d.alat_1} / ${d.alat_0}`],
+      ['Terakhir', d.terakhir?.waktu],
+      ['Keterangan alat', d.terakhir?.keterangan_alat],
+      ['Pesan bertanda tangan', d.terakhir?.pesan],
+    ]);
+  }
+
+  // ---------- Laporan ----------
+
+  function susunLaporan() {
+    const s = statusJembatan;
+    const isi = {
+      jenis: 'laporan-uji-jembatan-4.1',
+      halaman: VERSI_HALAMAN,
+      dibuat: new Date().toISOString(),
+      peramban: navigator.userAgent,
+      jembatan: s ? { versi: s.versi, mode: s.mode, perangkat: s.perangkat, waktu: s.waktu, alat: s.alat, galeri: s.galeri } : null,
+      adc: { terhubung: adc.terhubung, komunikasi_gagal: adc.komunikasi_gagal, pembaca: adc.pembaca, format_aktif: adc.format },
+      tangkap: laporan.tangkap,
+      daftar: laporan.daftar,
+      identifikasi: { hitungan, percobaan, tempelan: laporan.identifikasi },
+      sampel_kembar: laporan.sampel_kembar,
+      kalibrasi: laporan.kalibrasi,
+      penerapan_dpi: laporan.penerapan_dpi,
+      ukur: laporan.ukur,
+      detak: laporan.detak,
+      csp_dilanggar: laporan.csp_dilanggar,
+      galat: laporan.galat,
+    };
+    $('#laporan').value = JSON.stringify(isi, null, 1);
+    catat('Laporan disusun (' + $('#laporan').value.length + ' karakter).', 'ok');
+  }
+
+  async function salinLaporan() {
+    if (!$('#laporan').value) susunLaporan();
+    try {
+      await navigator.clipboard.writeText($('#laporan').value);
+      catat('Laporan disalin ke papan klip.', 'ok');
+    } catch {
+      $('#laporan').select();
+      catat('Papan klip tidak bisa dipakai; teks laporan sudah dipilih, salin dengan Ctrl+C.', 'peringatan');
+    }
+  }
+
+  async function hapusDataUji() {
+    const { kode, data } = await panggil('POST', '/hapus-uji', {});
+    catat(kode === 200 ? data.message : 'Hapus data uji: ' + (data?.message ?? kode), kode === 200 ? 'ok' : 'galat');
+    kosongkanSlot();
+    sampelTerakhir = null;
+    await muatStatus();
+    await muatGaleri();
+  }
+
+  // ---------- Mulai ----------
+
+  for (const tombol of document.querySelectorAll('.tab button')) {
+    tombol.addEventListener('click', () => bukaTab(tombol.dataset.tab));
+  }
+  $('#muat-status').addEventListener('click', muatStatus);
+  $('#mulai-tangkap').addEventListener('click', mulaiTangkap);
+  $('#henti-tangkap').addEventListener('click', hentiTangkap);
+  $('#format').addEventListener('change', () => { if (adc.menangkap) mulaiTangkap(); });
+  $('#relawan').addEventListener('change', kosongkanSlot);
+  $('#jari').addEventListener('change', kosongkanSlot);
+  $('#kosongkan-daftar').addEventListener('click', kosongkanSlot);
+  $('#kirim-ulang').addEventListener('click', kirimUlang);
+  $('#hitung-kalibrasi').addEventListener('click', hitungKalibrasi);
+  konfirmasiDuaKali($('#terapkan-dpi'), terapkanDpi);
+  $('#ukur').addEventListener('click', ukur);
+  $('#detak-sekarang').addEventListener('click', detak);
+  $('#detak-otomatis').addEventListener('change', (e) => {
+    clearInterval(pewaktuDetak);
+    pewaktuDetak = e.target.checked ? setInterval(detak, 60000) : null;
+    if (e.target.checked) detak();
+  });
+  $('#susun-laporan').addEventListener('click', susunLaporan);
+  $('#salin-laporan').addEventListener('click', salinLaporan);
+  konfirmasiDuaKali($('#hapus-uji'), hapusDataUji);
+  $('#berkas-uji').addEventListener('change', async (e) => {
+    for (const berkas of e.target.files) await sampelDariBerkas(berkas, berkas.name);
+    e.target.value = '';
+  });
+
+  tampilkanAdc();
+  tampilkanSlot();
+  tampilkanHitungan();
+  await muatStatus();
+  await muatGaleri();
+  mulaiAdc();
+  setInterval(muatStatus, 15000);
+})();
+</script>
+</body>
+</html>
