@@ -210,7 +210,7 @@ sealed partial class Brankas
         Encoding.ASCII.GetBytes(string.Join('|', VersiPesan, "templat", identitas, jari,
                                             urutan.ToString(CultureInfo.InvariantCulture), versi));
 
-    static bool MetadataSah(string? identitas, string? jari, int urutan, string? versi) =>
+    internal static bool MetadataSah(string? identitas, string? jari, int urutan, string? versi) =>
         Cocok(PolaIdentitas(), identitas) && Cocok(PolaJari(), jari) && urutan is >= 1 and <= 9
         && Cocok(PolaVersi(), versi);
 

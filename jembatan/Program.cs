@@ -141,6 +141,20 @@ catch (Exception e) when (e is BrankasRusakException or IOException or Unauthori
     return 1;
 }
 
+// templat.json yang rusak tidak boleh menjadi galeri kosong diam-diam, karena
+// semua siswa akan "tidak dikenali". Jadi berhenti juga.
+Pencocok pencocok;
+try
+{
+    pencocok = Pencocok.Muat(brankas, log);
+}
+catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+{
+    log.LogCritical(e, "Jembatan berhenti: templat.json di {Folder} tidak bisa dibaca.", folderData);
+    await app.DisposeAsync();
+    return 1;
+}
+
 var versi = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
 var mode = sebagaiLayanan ? "layanan" : arg.Pengembangan ? "pengembangan" : "konsol";
 var cekAlat = new CekAlat(log);
@@ -193,6 +207,7 @@ rute.Get("/status", Asal.HalamanSendiri | Asal.Kiosk, () => Results.Json(new
     perangkat = brankas.Perangkat,
     waktu = DateTimeOffset.Now.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
     alat = cekAlat.Periksa(),
+    galeri = pencocok.Ringkasan(),
 }));
 
 // Detak kiosk: status alat menurut pemeriksaan jembatan sendiri, bukan
@@ -222,6 +237,27 @@ rute.Post("/detak", Asal.HalamanSendiri | Asal.Kiosk, async (HttpRequest permint
     });
 });
 
+// Rute prototipe 4.1, hanya dari halaman uji jembatan sendiri. Identifikasi
+// baru dibuka untuk halaman kiosk di 4.4.
+rute.Get("/galeri", Asal.HalamanSendiri, () => Results.Json(pencocok.IsiGaleri()));
+rute.Post("/identifikasi", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanIdentifikasi>(permintaan);
+    return galat ?? Kirim(pencocok.Identifikasi(isi!));
+});
+rute.Post("/daftar", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanDaftar>(permintaan);
+    return galat ?? Kirim(pencocok.Daftarkan(isi!));
+});
+rute.Post("/kalibrasi", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanKalibrasi>(permintaan);
+    return galat ?? Kirim(pencocok.Kalibrasi(isi!));
+});
+rute.Post("/ukur", Asal.HalamanSendiri, () => Kirim(pencocok.Ukur()));
+rute.Post("/hapus-uji", Asal.HalamanSendiri, () => Kirim(pencocok.HapusDataUji()));
+
 app.MapFallback(() => Results.Json(new { status = "error", message = "Rute tidak dikenal." },
     statusCode: StatusCodes.Status404NotFound));
 
@@ -240,6 +276,8 @@ return 0;
 
 static IResult Galat(int kode, string pesan) =>
     Results.Json(new { status = "error", message = pesan }, statusCode: kode);
+
+static IResult Kirim(Hasil hasil) => Results.Json(hasil.Isi, statusCode: hasil.Kode);
 
 // Isi kiriman JSON, atau jawaban galat yang siap dikirim. Kiriman lebih dari
 // batas Kestrel (2 MB) dijawab 413.
