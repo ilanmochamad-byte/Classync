@@ -1,0 +1,80 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Jembatan sidik jari: layanan kecil di PC kiosk yang mencocokkan sidik jari
+    (SourceAFIS, 1:N) lalu menandatangani hasilnya untuk server.
+
+    Folder ini tidak ikut deploy: .cpanel.yml tidak menyalinnya.
+
+    Dibangun di Mac, dijalankan di Windows 10/11 64-bit. Perintah
+      dotnet publish -c Release -r win-x64
+    menghasilkan satu jembatan-sidik-jari.exe mandiri; runtime .NET ikut di
+    dalamnya, jadi PC kiosk tidak perlu memasang apa pun.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>jembatan-sidik-jari</AssemblyName>
+    <RootNamespace>JembatanSidikJari</RootNamespace>
+    <Version>0.1.0</Version>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <DebugType>embedded</DebugType>
+
+    <!-- Versi semua paket, termasuk dependensi transitifnya, dikunci di
+         packages.lock.json beserta hash isinya. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- Penganalisis single-file menyala di setiap build, bukan hanya saat
+         publish. Ia menarik paket ILLink; tanpa ini lock file build biasa
+         berbeda dari publish, dan restore terkunci gagal. -->
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+  </PropertyGroup>
+
+  <!-- Hanya saat publish untuk Windows. Tanpa trimming: System.Management
+       memakai COM, dan trimming mematikannya. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kestrel dan minimal API tanpa Web SDK, supaya web.config dan modul
+         IIS yang tidak dibutuhkan layanan Windows tidak ikut. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pencocok. Port .NET berhenti di 3.14.0 (Juni 2022). Templat terikat
+         versi: mengganti versi berarti semua jari didaftarkan ulang. -->
+    <PackageReference Include="SourceAFIS" Version="3.14.0" />
+    <!-- Dependensi SourceAFIS. Versi minimum yang ditariknya (2.1.3) punya
+         advisori keamanan berat; 2.1.13 versi 2.x terakhir. Jangan naik ke
+         3.x: lisensinya berganti dan kemungkinan besar memutus SourceAFIS. -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.13" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+    <PackageReference Include="System.Management" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Halaman uji ikut di dalam .exe. Kosong sampai berkasnya ada. -->
+    <EmbeddedResource Include="wwwroot/*.html" LogicalName="halaman/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- Paket runtime ASP.NET Core membawa penangan IIS. Jembatan memakai
+       Kestrel, bukan IIS, jadi berkas itu tidak ikut dipublikasikan dan
+       hasilnya satu .exe saja. -->
+  <Target Name="BuangPenanganIis" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(Filename)%(Extension)' == 'aspnetcorev2_inprocess.dll'" />
+    </ItemGroup>
+  </Target>
+
+</Project>
