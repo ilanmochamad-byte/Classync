@@ -71,7 +71,7 @@ Get-FileHash .\jembatan-sidik-jari.exe -Algorithm SHA256
 ```
 
 Panel Jembatan di halaman uji menampilkan versi `.exe` yang sedang jalan,
-berbentuk `0.1.1+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
+berbentuk `0.1.2+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
 setelah semua perubahan di-commit, supaya commit itu memang isi paketnya.
 
 ## Uji di PC kiosk
@@ -80,6 +80,11 @@ Kerjakan di luar jam kiosk (hari Minggu, atau setelah siswa pulang), karena
 ada restart. Sisihkan sekitar 3 jam. Pakai akun admin. Siapkan 3–4 relawan
 dewasa yang sudah menandatangani persetujuan uji coba; tidak ada siswa yang
 ikut.
+
+Uji 3 Oktober 2026 dijalankan di komputer lain dengan pembaca sekolah. Itu
+cukup untuk mencoba alur halaman, tetapi kriteria lanjut ke 4.2 dinilai di PC
+kiosk: driver dan ADC (fase A), ukur waktu (fase B langkah 5), dan seluruh
+fase C bergantung pada PC itu sendiri.
 
 ### Fase A: driver, ADC, dan jembatan di jendela konsol
 
@@ -126,35 +131,46 @@ harus biner acak, bukan JSON yang terbaca. Itu tanda DPAPI bekerja.
 ### Fase B: tangkap, daftar, cocok
 
 Semuanya di halaman `http://127.0.0.1:47890/`, dengan jembatan di jendela
-konsol.
+konsol. Jangan tutup jendela itu sebelum fase C langkah 1: jembatan ikut
+berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
 
 1. **Tangkap.** Lima tempelan dengan format Raw, lalu lima dengan PNG (pilih di
    panel Authentication Device Client). Periksa ukuran, DPI dari alat, dan
-   baris "Panjang piksel". Yang diharapkan dari U.are.U 4500, terukur di PC
-   kiosk pada 1 Oktober 2026:
+   baris "Panjang piksel". Yang diharapkan dari U.are.U 4500, terukur dengan
+   pembaca sekolah pada 1 dan 3 Oktober 2026:
 
    - Raw: ukuran 500 × 550, DPI dari alat 700, dan "Panjang piksel" berbunyi
-     `275012 = lebar × tinggi + 12 byte ekor`. Isi baris "Byte ekor
-     (heksadesimal)" ikut tercatat di laporan.
+     `275012 = lebar × tinggi + 12 byte ekor`. Baris "Byte ekor
+     (heksadesimal)" berisi dua belas `00`.
    - PNG: ukuran 500 × 550. Baris DPI, panjang piksel, dan byte ekor kosong.
 
    Kalau "Panjang piksel" merah dengan tulisan TIDAK, jembatan akan menolak
    sampel Raw itu. Berhenti di sini dan kirim tangkapan layarnya.
-2. **Daftar.** Setiap relawan mendaftarkan 6 jari (telunjuk, tengah, manis;
-   kanan dan kiri), 4 tempelan per jari. Coba daftarkan ulang jari R1 telunjuk
-   kanan dengan kode lain: harus ditolak sebagai jari ganda.
-3. **Kalibrasi & ukur.** "Hitung kalibrasi", pilih DPI dengan "Jarak" terbesar,
-   lalu "Terapkan DPI" (klik dua kali). Kerjakan sebelum jembatan dimulai
-   ulang: gambar pendaftaran hanya ada di memori. Jangan dilewati: galeri
-   mulai dari 500 DPI, sedangkan alat ini melaporkan 700.
-4. **Identifikasi.** Sebelum setiap tempelan, pilih "Yang menempel sekarang".
-   Tempel setiap jari terdaftar 5 kali. Tempel jempol dan kelingking 5 kali
-   per orang dengan pilihan "Jari tidak terdaftar".
+2. **Daftar.** Mulai dari galeri kosong: kalau masih ada data uji lama, klik
+   "Hapus semua data uji" di tab Laporan (klik dua kali), supaya galeri baru
+   mulai dari 700 DPI. Format pindah sendiri ke Raw saat tab Daftar dibuka.
+   Setiap relawan mendaftarkan 6 jari (telunjuk, tengah, manis; kanan dan
+   kiri), 4 tempelan per jari. Periksa pilihan Jari sebelum menempel: tabel
+   galeri harus memuat 6 jari per relawan. Coba daftarkan ulang jari R1
+   telunjuk kanan dengan kode lain: harus ditolak sebagai jari ganda.
+3. **Kalibrasi & ukur.** "Hitung kalibrasi". Halaman memilih sendiri DPI
+   dengan "Jarak" terbesar dan menolak DPI yang jaraknya ≤ 0. Uji 3 Oktober
+   memilih 700, sama dengan DPI awal galeri; kalau yang terpilih tetap 700,
+   tidak ada yang perlu diterapkan. Kalau yang terpilih DPI lain, klik
+   "Terapkan DPI" dua kali. Kerjakan sebelum jembatan dimulai ulang: gambar
+   pendaftaran hanya ada di memori.
+4. **Identifikasi.** Klik "Mulai urutan", lalu ikuti tulisan "Sekarang: …".
+   Halaman yang memilih "Yang menempel sekarang" dan menghitung tempelannya:
+   setiap jari terdaftar 5 tempelan, lalu setiap relawan menempelkan jempol
+   atau kelingking 5 kali sebagai jari tidak terdaftar. Kalau seorang relawan
+   berhalangan, pakai "Lewati". Sampel hanya dihitung selama tab Identifikasi
+   terbuka.
 5. **Kalibrasi & ukur.** "Ukur waktu 1:N", sebaiknya setelah beberapa
-   identifikasi.
+   identifikasi. Angkanya hanya berlaku untuk komputer tempat uji berjalan.
 6. **Identifikasi.** "Kirim ulang sampel terakhir": harus ditolak (409).
 7. **Detak.** "Detak sekarang". Cabut alat, detak lagi: status alat harus
-   berubah. Colok kembali. Nyalakan "Otomatis tiap 60 detik" selama 30 menit.
+   berubah. Colok kembali. Nyalakan "Otomatis tiap 60 detik" selama 30 menit,
+   dengan halaman dan jendela konsol tetap terbuka.
 
 ### Fase C: layanan dan akun standar
 
@@ -224,10 +240,11 @@ konsol.
 
 ### Kriteria lanjut ke 4.2
 
-- Salah orang: 0.
+- Salah orang: 0. Yang dihitung baris "SALAH ORANG"; jari lain dari orang
+  yang sama dicatat terpisah dan tidak termasuk.
 - Jari tidak terdaftar yang diterima: 0.
-- Dikenali pada tempelan pertama ≥ 90%, dan dalam tiga tempelan ≥ 99%.
-- Ujung ke ujung di PC ≤ 1 detik pada galeri 500 templat.
+- Orang dikenali pada tempelan pertama ≥ 90%, dan dalam tiga tempelan ≥ 99%.
+- Ujung ke ujung di PC kiosk ≤ 1 detik pada galeri 500 templat.
 
 ## Titik mundur
 
@@ -274,12 +291,12 @@ Halaman meneruskan sampel dari WebSDK apa adanya; jembatan yang membacanya.
   (base64url), dan `Format` memuat `iWidth`, `iHeight`, dan `iXdpi`. Struktur
   ini tidak didokumentasikan HID; yang tertulis di sini hasil pengukuran.
 - **Ekor:** pikselnya boleh diikuti byte yang bukan gambar. U.are.U 4500
-  mengirim 500 × 550 piksel ditambah 12 byte di akhir (275.012 byte); isinya
-  belum diketahui. Jembatan menerima kelebihan yang kurang dari sisi
-  terpendek gambar, dan hanya memakai lebar × tinggi byte pertama, juga
-  untuk penjaga sampel kembar. Data yang kurang, atau yang lebihnya sepanjang
-  sisi terpendek atau lebih, ditolak: itu tanda `Format` tidak menggambarkan
-  datanya.
+  mengirim 500 × 550 piksel ditambah 12 byte di akhir (275.012 byte); pada
+  uji 3 Oktober isinya selalu nol. Jembatan menerima kelebihan yang kurang
+  dari sisi terpendek gambar, dan hanya memakai lebar × tinggi byte pertama,
+  juga untuk penjaga sampel kembar. Data yang kurang, atau yang lebihnya
+  sepanjang sisi terpendek atau lebih, ditolak: itu tanda `Format` tidak
+  menggambarkan datanya.
 - **PNG:** base64url berkas PNG. Hanya untuk prototipe.
 
 ### Data
@@ -293,7 +310,8 @@ Di `C:\ProgramData\JembatanSidikJari` (di Mac: folder `--data`):
 - `templat.json`: templat terenkripsi AES-256-GCM, satu rekaman per tempelan,
   terikat pada `SJ1|templat|identitas|jari|urutan|versi`. Rekaman yang
   dipindah ke identitas lain gagal didekripsi. Kolom `versi` memuat versi
-  SourceAFIS dan DPI ekstraksi, misalnya `sourceafis-net-3.14.0-500`.
+  SourceAFIS dan DPI ekstraksi, misalnya `sourceafis-net-3.14.0-700`. Galeri
+  baru mulai dari 700 DPI; galeri yang sudah berisi memakai DPI rekamannya.
 
 Gambar sidik jari tidak pernah ditulis ke disk. Gambar pendaftaran dan probe
 identifikasi terakhir hanya disimpan di memori, untuk kalibrasi dan ukur waktu.
@@ -328,7 +346,9 @@ hash_hmac('sha256', $pesan, hex2bin('000102030405060708090a0b0c0d0e0f10111213141
 Identifikasi diterima kalau skor terbaik ≥ 50 dan unggul ≥ 10 atas identitas
 kedua. Pendaftaran memakai ambang 1:1 SourceAFIS (40) untuk keserasian
 tempelan dan untuk mencari jari ganda. Angka 50 dan 10 adalah nilai awal
-prototipe; angka akhirnya dipilih dari laporan uji di PC kiosk.
+prototipe; angka akhirnya dipilih dari laporan uji di PC kiosk. Pada
+kalibrasi 3 Oktober di 700 DPI, skor sama-jari terendah 74,5 dan beda-jari
+tertinggi 32,3.
 
 ## Mengubah halaman uji
 
