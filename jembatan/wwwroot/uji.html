@@ -14,7 +14,7 @@
   diubah, hash-nya harus dihitung ulang (lihat README.md), atau peramban
   menolak menjalankannya.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-yHZswVg0Z0NfwVq7ex410z7gYzEyb8MJK9hS8Sr/S3Y=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-PoBQctumOm5OUCqclWAHBJdHqQUC71Le/xS24A6L2y8=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
 <title>Uji jembatan sidik jari</title>
 <style>
   :root { --biru: #1d4ed8; --hijau: #15803d; --merah: #b91c1c; --kuning: #a16207; --abu: #6b7280; --garis: #d1d5db; }
@@ -42,7 +42,9 @@
   .peringatan { color: var(--kuning); }
   .redup { color: var(--abu); }
   .hasil-besar { font-size: 28px; font-weight: 700; margin: 8px 0; }
-  .giliran { font-size: 20px; font-weight: 700; margin: 8px 0; }
+  .giliran { font-size: 20px; font-weight: 700; margin: 8px 0; padding: 2px 6px; border-radius: 6px; }
+  .giliran.ganti { background: #fef3c7; }
+  #gambar-identifikasi canvas { max-width: 160px; border: 1px solid var(--garis); background: #fff; }
   .baris { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
   .log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; background: #0b1020; color: #e5e7eb; border-radius: 6px; padding: 8px; height: 200px; overflow: auto; white-space: pre-wrap; }
   .log .ok { color: #86efac; }
@@ -98,6 +100,7 @@
     <button data-tab="detak" aria-selected="false">Detak</button>
     <button data-tab="laporan" aria-selected="false">Laporan</button>
   </nav>
+  <p id="peringatan-dpi" class="kartu galat" hidden></p>
 
   <section class="kartu" data-tab="tangkap">
     <h2>Tangkap: periksa format sampel</h2>
@@ -140,13 +143,15 @@
     <div class="baris">
       <button id="mulai-urutan">Mulai urutan</button>
       <button id="lewati-urutan" disabled>Lewati</button>
+      <button id="lewati-orang" disabled>Lewati relawan ini</button>
       <button id="henti-urutan" disabled>Hentikan urutan</button>
       <label>Yang menempel sekarang <select id="harap"></select></label>
       <button id="kirim-ulang">Kirim ulang sampel terakhir</button>
     </div>
     <div id="giliran" class="giliran redup">Klik "Mulai urutan".</div>
-    <p class="redup">Dalam urutan, setiap jari terdaftar ditempel 5 kali, lalu setiap relawan menempelkan jari yang tidak terdaftar (jempol atau kelingking) 5 kali. Halaman yang memilih "Yang menempel sekarang"; ikuti saja tulisan di atas. Tanpa urutan, pilih sendiri sebelum setiap tempelan. Identifikasi hanya memakai format Raw.</p>
+    <p class="redup">Urutan berputar: setiap jari terdaftar ditempel sekali per putaran, lima putaran per relawan. Tempelan yang tidak dikenali diulang dengan jari yang sama, paling banyak tiga kali. Sesudah itu relawan menempelkan jari yang tidak terdaftar (jempol atau kelingking) 5 kali. Halaman yang memilih "Yang menempel sekarang"; ikuti saja tulisan di atas. Tanpa urutan, pilih sendiri sebelum setiap tempelan. Identifikasi hanya memakai format Raw.</p>
     <div id="hasil-identifikasi" class="hasil-besar redup">Tempelkan jari.</div>
+    <div id="gambar-identifikasi"></div>
     <p id="rincian-identifikasi" class="redup"></p>
     <table id="tabel-hitungan"><tbody></tbody></table>
   </section>
@@ -181,10 +186,11 @@
 
   <section class="kartu" data-tab="laporan" hidden>
     <h2>Laporan</h2>
-    <p class="redup">Isinya hanya angka dan metadata: tanpa gambar, templat, kunci, atau nama. Susun, salin, lalu kirim ke Claude.</p>
+    <p class="redup">Isinya hanya angka dan metadata: tanpa gambar, templat, kunci, atau nama. Catatannya disimpan di peramban ini, jadi tidak hilang saat halaman dimuat ulang atau jembatan dimulai ulang. Susun, salin, lalu kirim ke Claude; sesudah itu kosongkan.</p>
     <div class="baris">
       <button id="susun-laporan">Susun laporan</button>
       <button id="salin-laporan">Salin</button>
+      <button id="kosongkan-laporan" class="bahaya">Kosongkan laporan</button>
       <button id="hapus-uji" class="bahaya">Hapus semua data uji</button>
     </div>
     <textarea id="laporan" readonly></textarea>
@@ -200,16 +206,16 @@
 <script>
 'use strict';
 (async () => {
-  const VERSI_HALAMAN = '0.1.2';
+  const VERSI_HALAMAN = '0.1.3';
   const $ = (pemilih) => document.querySelector(pemilih);
 
   // ---------- Catatan untuk laporan dan log di layar ----------
 
   const laporan = {
     tangkap: [], daftar: [], identifikasi: [], sampel_kembar: [],
-    kalibrasi: null, penerapan_dpi: [], ukur: null, urutan: null,
+    kalibrasi: null, penerapan_dpi: [], ukur: null, urutan: null, urutan_sebelumnya: [],
     detak: { ok: 0, gagal: 0, alat_1: 0, alat_0: 0, terakhir: null },
-    csp_dilanggar: [], galat: [],
+    csp_dilanggar: [], galat: [], sesi: [],
   };
 
   function catat(teks, jenis) {
@@ -218,7 +224,7 @@
     if (jenis) baris.className = jenis;
     const wadah = $('#log');
     wadah.prepend(baris);
-    while (wadah.childNodes.length > 300) wadah.lastChild.remove();
+    while (wadah.childNodes.length > 500) wadah.lastChild.remove();
     if (jenis === 'galat') laporan.galat.push({ waktu: new Date().toISOString(), pesan: teks });
   }
 
@@ -228,6 +234,55 @@
     laporan.csp_dilanggar.push({ arahan: e.violatedDirective, diblokir: e.blockedURI });
     catat('CSP memblokir ' + e.blockedURI + ' (' + e.violatedDirective + ')', 'galat');
   });
+
+  // Laporan disimpan di localStorage halaman ini, supaya tidak hilang saat
+  // halaman dimuat ulang atau jembatan berpindah dari konsol ke layanan. Uji di
+  // PC kiosk 3 Oktober 2026 kehilangan bagian tangkap, daftar, kalibrasi, dan
+  // ukur karena itu. Isinya sama dengan laporan: tanpa gambar atau templat.
+  const KUNCI_SIMPAN = 'uji-jembatan-laporan-v1';
+  let simpananTerakhir = null;
+  let simpanGagal = false;
+  let simpanDimatikan = false;
+
+  function simpan() {
+    if (simpanDimatikan) return;
+    const teks = JSON.stringify({ versi: 1, laporan, hitungan, percobaan });
+    if (teks === simpananTerakhir) return;
+    try {
+      localStorage.setItem(KUNCI_SIMPAN, teks);
+      simpananTerakhir = teks;
+    } catch (err) {
+      if (!simpanGagal) catat('Laporan tidak bisa disimpan di peramban: ' + err.message, 'peringatan');
+      simpanGagal = true;
+    }
+  }
+
+  function pulihkan() {
+    let data = null;
+    try {
+      data = JSON.parse(localStorage.getItem(KUNCI_SIMPAN) ?? 'null');
+    } catch {
+      data = null;
+    }
+    if (data?.versi !== 1 || typeof data.laporan !== 'object' || data.laporan === null) return;
+    for (const kunci of Object.keys(laporan)) {
+      if (kunci in data.laporan) laporan[kunci] = data.laporan[kunci];
+    }
+    Object.assign(hitungan, data.hitungan ?? {});
+    Object.assign(percobaan, data.percobaan ?? {});
+    // Urutan yang belum selesai saat halaman dimuat ulang tidak bisa diteruskan.
+    if (laporan.urutan && !laporan.urutan.selesai && !laporan.urutan.dihentikan) laporan.urutan.terputus = new Date().toISOString();
+    catat(`Laporan dari sesi sebelumnya dipulihkan: ${laporan.tangkap.length} tangkapan, ${laporan.daftar.length} pendaftaran, `
+      + `${laporan.identifikasi.length} tempelan identifikasi.`, 'ok');
+  }
+
+  function kosongkanLaporan() {
+    simpanDimatikan = true;
+    try {
+      localStorage.removeItem(KUNCI_SIMPAN);
+    } catch { /* penyimpanan tidak tersedia */ }
+    location.reload();
+  }
 
   // ---------- Tampilan ----------
 
@@ -320,7 +375,11 @@
     const g = data.galeri ?? {};
     // Sebelum kalibrasi atau pilihan pengguna, pemilih DPI mengikuti DPI galeri,
     // supaya "Terapkan DPI" tidak diam-diam memakai pilihan pertama.
-    if (!dpiDipilih && g.dpi) $('#dpi-terapkan').value = String(g.dpi);
+    if (!dpiDipilih && g.dpi) {
+      pastikanPilihanDpi(g.dpi);
+      $('#dpi-terapkan').value = String(g.dpi);
+    }
+    periksaDpi();
     const a = data.alat ?? {};
     isiTabel($('#tabel-jembatan tbody'), [
       ['Versi', data.versi],
@@ -366,8 +425,13 @@
 
   // ---------- Authentication Device Client (WebSDK HID) ----------
 
-  const adc = { terhubung: null, komunikasi_gagal: 0, pembaca: [], menangkap: false, format: 'raw', kualitas: null };
+  const adc = { terhubung: null, komunikasi_gagal: 0, pembaca: [], menangkap: false, format: 'raw', kualitas: null, mulai_ulang: 0 };
   let api = null;
+  // Lewat driver WBF, penangkapan berhenti setelah SETIAP tempelan, lalu muncul
+  // kejadian "pembaca terhubung" ber-UID nol, dan halaman memulainya lagi.
+  // Supaya catatan kejadian tidak tenggelam, mulai dan berhenti hanya dicatat
+  // kalau diminta pengguna; yang otomatis cukup dihitung.
+  let catatTangkap = true;
 
   function tampilkanAdc() {
     isiTabel($('#tabel-adc tbody'), [
@@ -375,7 +439,8 @@
         adc.terhubung ? 'ok' : adc.terhubung === false ? 'galat' : 'redup'],
       ['Pembaca', adc.pembaca.length ? adc.pembaca.map((p) => `${p.uid} (${p.teknologi ?? '?'}, ${p.modalitas ?? '?'})`).join('; ') : 'Tidak ada',
         adc.pembaca.length ? 'ok' : 'galat'],
-      ['Penangkapan', adc.menangkap ? 'Aktif, format ' + adc.format : 'Tidak aktif'],
+      ['Penangkapan', (adc.menangkap ? 'Aktif, format ' + adc.format : 'Tidak aktif')
+        + (adc.mulai_ulang ? `; dimulai ulang otomatis ${adc.mulai_ulang} kali` : '')],
       ['Kualitas terakhir', adc.kualitas],
     ]);
   }
@@ -395,10 +460,22 @@
       adc.menangkap = false;
       tampilkanAdc();
     };
-    api.onDeviceConnected = (e) => { catat('Pembaca terhubung: ' + e.deviceUid, 'ok'); muatPembaca(); };
+    api.onDeviceConnected = (e) => {
+      if (!/^[0-]+$/.test(e.deviceUid ?? '')) catat('Pembaca terhubung: ' + e.deviceUid, 'ok');
+      muatPembaca();
+    };
     api.onDeviceDisconnected = (e) => { catat('Pembaca terputus: ' + e.deviceUid, 'galat'); muatPembaca(); };
-    api.onAcquisitionStarted = () => { adc.menangkap = true; catat('Penangkapan dimulai, format ' + adc.format + '.'); tampilkanAdc(); };
-    api.onAcquisitionStopped = () => { adc.menangkap = false; catat('Penangkapan berhenti.'); tampilkanAdc(); };
+    api.onAcquisitionStarted = () => {
+      adc.menangkap = true;
+      if (catatTangkap) catat('Penangkapan dimulai, format ' + adc.format + '.');
+      catatTangkap = false;
+      tampilkanAdc();
+    };
+    api.onAcquisitionStopped = () => {
+      adc.menangkap = false;
+      if (catatTangkap) catat('Penangkapan berhenti.');
+      tampilkanAdc();
+    };
     api.onQualityReported = (e) => {
       adc.kualitas = Fingerprint.QualityCode[e.quality] ?? String(e.quality);
       if (e.quality !== Fingerprint.QualityCode.Good) catat('Kualitas tempelan: ' + adc.kualitas, 'peringatan');
@@ -427,7 +504,10 @@
         }
       }));
       tampilkanAdc();
-      if (adc.pembaca.length > 0 && !adc.menangkap) await mulaiTangkap();
+      if (adc.pembaca.length > 0 && !adc.menangkap) {
+        if (!catatTangkap) adc.mulai_ulang++;
+        await mulaiTangkap();
+      }
     } catch (err) {
       adc.terhubung = false;
       tampilkanAdc();
@@ -435,8 +515,9 @@
     }
   }
 
-  async function mulaiTangkap() {
+  async function mulaiTangkap(olehPengguna = false) {
     if (!api) return;
+    if (olehPengguna) catatTangkap = true;
     const format = $('#format').value;
     try {
       if (adc.menangkap) await api.stopAcquisition();
@@ -451,6 +532,7 @@
 
   async function hentiTangkap() {
     if (!api) return;
+    catatTangkap = true;
     try {
       await api.stopAcquisition();
       adc.menangkap = false;
@@ -513,6 +595,11 @@
     const luas = format.iWidth * format.iHeight;
     const lebih = piksel.length - luas;
     const diterima = lebih >= 0 && lebih < Math.min(format.iWidth, format.iHeight);
+    // Persentase piksel gelap: ukuran kasar luas sidik yang menempel. Satu
+    // angka per gambar, bukan data biometrik.
+    const jumlah = Number.isFinite(luas) ? Math.min(piksel.length, luas) : 0;
+    let gelap = 0;
+    for (let i = 0; i < jumlah; i++) if (piksel[i] < 128) gelap++;
     return {
       format: 'raw',
       teks: bio.Data,
@@ -523,6 +610,7 @@
       byte_lebih: Number.isFinite(lebih) ? lebih : null,
       panjang_diterima: diterima,
       ekor_hex: diterima && lebih > 0 ? heks(piksel.subarray(luas, luas + 64)) + (lebih > 64 ? ' …' : '') : null,
+      piksel_gelap_persen: jumlah ? Math.round((gelap / jumlah) * 1000) / 10 : null,
       kolom_format: format,
       header: bio.Header ?? null,
       gambar: () => kanvasDariPiksel(piksel, format.iWidth, format.iHeight),
@@ -543,6 +631,7 @@
       byte_lebih: null,
       panjang_diterima: null,
       ekor_hex: null,
+      piksel_gelap_persen: null,
       kolom_format: null,
       header: null,
       gambar: () => {
@@ -556,8 +645,9 @@
   function terimaSampelAlat(e) {
     const t0 = performance.now();
     let sampel;
+    let daftar;
     try {
-      const daftar = JSON.parse(e.samples);
+      daftar = JSON.parse(e.samples);
       if (e.sampleFormat === Fingerprint.SampleFormat.Raw) {
         sampel = sampelRaw(daftar[0]);
       } else if (e.sampleFormat === Fingerprint.SampleFormat.PngImage) {
@@ -573,6 +663,7 @@
     sampel.t0 = t0;
     sampel.asal = 'alat';
     sampel.kualitas = adc.kualitas;
+    sampel.adc = { mulai_ulang: adc.mulai_ulang, sampel_dalam_kejadian: Array.isArray(daftar) ? daftar.length : null };
     arahkan(sampel);
   }
 
@@ -609,7 +700,28 @@
 
   let tabAktif = 'tangkap';
 
+  // DPI yang dilaporkan alat bergantung driver: 508 lewat WBF, 700 lewat driver
+  // DigitalPersona. Galeri yang dibuat dengan DPI lain cocoknya lemah, seperti
+  // di PC kiosk pada 3 Oktober 2026 (galeri 700, alat 508).
+  let dpiAlatTerakhir = null;
+
+  function periksaDpi() {
+    const g = statusJembatan?.galeri;
+    const beda = dpiAlatTerakhir !== null && g?.templat > 0 && Math.abs(dpiAlatTerakhir - g.dpi) / g.dpi > 0.05;
+    const peringatan = $('#peringatan-dpi');
+    peringatan.hidden = !beda;
+    if (!beda) return;
+    const teks = `DPI alat ${dpiAlatTerakhir}, tetapi DPI galeri ${g.dpi}: hasil cocok akan lemah. `
+      + 'Hapus semua data uji lalu daftar ulang, atau jalankan kalibrasi dan terapkan DPI yang terpilih.';
+    if (peringatan.textContent !== teks) catat(teks, 'galat');
+    peringatan.textContent = teks;
+  }
+
   function arahkan(sampel) {
+    if (sampel.format === 'raw' && sampel.dpi) {
+      dpiAlatTerakhir = sampel.dpi;
+      periksaDpi();
+    }
     if ((tabAktif === 'daftar' || tabAktif === 'identifikasi') && sampel.format !== 'raw') {
       catat(`Sampel ${sampel.format} diabaikan: pendaftaran dan identifikasi hanya memakai Raw.`, 'galat');
       return;
@@ -637,7 +749,7 @@
     if ($('#format').value === 'raw') return;
     $('#format').value = 'raw';
     catat('Format diganti ke Raw: pendaftaran dan identifikasi hanya memakai Raw.', 'peringatan');
-    if (adc.menangkap) mulaiTangkap();
+    if (adc.menangkap) mulaiTangkap(true);
   }
 
   // ---------- Tangkap ----------
@@ -648,11 +760,18 @@
     return `${c.panjang_piksel} = lebar × tinggi` + (c.byte_lebih > 0 ? ` + ${c.byte_lebih} byte ekor` : '');
   }
 
+  function tampilkanJumlahTangkap() {
+    if (!laporan.tangkap.length) return;
+    const raw = laporan.tangkap.filter((x) => x.format === 'raw').length;
+    $('#jumlah-tangkap').textContent = `Sudah dicatat ${laporan.tangkap.length} sampel: ${raw} raw, ${laporan.tangkap.length - raw} png.`;
+  }
+
   function terimaTangkap(s) {
     const catatan = {
       waktu: new Date().toISOString(), asal: s.asal, format: s.format,
       lebar: s.lebar, tinggi: s.tinggi, dpi: s.dpi,
       panjang_piksel: s.panjang_piksel, byte_lebih: s.byte_lebih, panjang_diterima: s.panjang_diterima, ekor_hex: s.ekor_hex,
+      piksel_gelap_persen: s.piksel_gelap_persen,
       kolom_format: s.kolom_format, header: s.header, kualitas: s.kualitas, panjang_teks: s.teks.length,
     };
     laporan.tangkap.push(catatan);
@@ -665,13 +784,13 @@
         ['DPI dari alat', catatan.dpi],
         ['Panjang piksel', teksPanjang(catatan), catatan.panjang_diterima === false ? 'galat' : ''],
         ['Byte ekor (heksadesimal)', catatan.ekor_hex],
+        ['Piksel gelap', catatan.piksel_gelap_persen === null ? null : catatan.piksel_gelap_persen + '%'],
         ['Kolom Format', catatan.kolom_format ? JSON.stringify(catatan.kolom_format) : null],
         ['Header BioSample', catatan.header ? JSON.stringify(catatan.header) : null],
         ['Kualitas', catatan.kualitas],
         ['Panjang teks sampel', catatan.panjang_teks],
       ]);
-      const raw = laporan.tangkap.filter((x) => x.format === 'raw').length;
-      $('#jumlah-tangkap').textContent = `Sudah dicatat ${laporan.tangkap.length} sampel: ${raw} raw, ${laporan.tangkap.length - raw} png.`;
+      tampilkanJumlahTangkap();
     };
     if (s.format === 'png') {
       elemen.addEventListener('load', () => {
@@ -753,9 +872,10 @@
       diganti: data?.diganti ?? null,
       waktu_ms: data?.waktu_ms ?? null,
       sampel: data?.sampel ?? null,
+      dpi_galeri: data?.dpi ?? null,
     });
     if (kode === 200) {
-      hasil.textContent = `Terdaftar: ${identitas}. Keserasian ${data.skor_keserasian.join(', ')}; jari lain tertinggi ${data.skor_jari_lain_tertinggi}.`;
+      hasil.textContent = `Terdaftar: ${identitas}. Keserasian ${data.skor_keserasian.join(', ')}; jari lain tertinggi ${data.skor_jari_lain_tertinggi}; DPI galeri ${data.dpi}.`;
       hasil.className = 'ok';
       catat('Pendaftaran ' + identitas + ' berhasil.', 'ok');
       kosongkanSlot();
@@ -791,10 +911,17 @@
 
   // Urutan: halaman yang menentukan jari yang harus ditempel, supaya label
   // setiap tempelan benar. Uji 3 Oktober 2026 kehilangan labelnya karena
-  // pilihan "yang menempel" tertinggal sama untuk 22 tempelan. Setiap butir
-  // ditempel 5 kali; kalau percobaan masih berjalan setelah tempelan kelima,
-  // butir itu diteruskan sampai percobaannya selesai.
-  const TEMPELAN_PER_BUTIR = 5;
+  // pilihan "yang menempel" tertinggal sama untuk 22 tempelan.
+  //
+  // Urutannya berputar: satu butir adalah satu percobaan untuk satu jari, dan
+  // setiap relawan melewati semua jarinya lima putaran. Percobaan selesai
+  // begitu orangnya dikenali, atau setelah tiga tempelan gagal. Ini meniru
+  // pemakaian nyata (satu sampai tiga tempelan per orang) dan menghindari lima
+  // tempelan berturut-turut pada jari yang sama, yang di PC kiosk selalu
+  // gagal mulai tempelan kelima tanpa sebab yang sudah diketahui.
+  const PUTARAN = 5;
+  const TEMPELAN_ASING = 5;
+  const TEMPELAN_PERCOBAAN = 3;
   const URUTAN_JARI = ['TK', 'TI', 'GK', 'GI', 'MK', 'MI'];
   const NAMA_JARI = { TK: 'telunjuk kanan', TI: 'telunjuk kiri', GK: 'tengah kanan', GI: 'tengah kiri', MK: 'manis kanan', MI: 'manis kiri' };
   let urutan = null;
@@ -803,12 +930,18 @@
     const kodeJari = (i) => i.slice(i.lastIndexOf('-') + 1);
     const nama = (o) => o.replace(/^uji:/, '');
     const identitas = [...new Set(galeri.map((j) => j.identitas))].sort((a, b) =>
-      orangDari(a).localeCompare(orangDari(b)) || URUTAN_JARI.indexOf(kodeJari(a)) - URUTAN_JARI.indexOf(kodeJari(b)));
-    const orang = [...new Set(identitas.map(orangDari))];
-    return [
-      ...identitas.map((i) => ({ harap: i, label: `${nama(orangDari(i))} ${NAMA_JARI[kodeJari(i)] ?? kodeJari(i)}` })),
-      ...orang.map((o) => ({ harap: 'ASING', label: `${nama(o)} jempol atau kelingking (jari tidak terdaftar)` })),
-    ];
+      URUTAN_JARI.indexOf(kodeJari(a)) - URUTAN_JARI.indexOf(kodeJari(b)));
+    const butir = [];
+    for (const orang of [...new Set(identitas.map(orangDari))].sort()) {
+      const jari = identitas.filter((i) => orangDari(i) === orang);
+      for (let putaran = 1; putaran <= PUTARAN; putaran++) {
+        for (const i of jari) {
+          butir.push({ harap: i, orang, putaran, label: `${nama(orang)} ${NAMA_JARI[kodeJari(i)] ?? kodeJari(i)}` });
+        }
+      }
+      butir.push({ harap: 'ASING', orang, putaran: null, label: `${nama(orang)} jempol atau kelingking (jari tidak terdaftar)` });
+    }
+    return butir;
   }
 
   async function mulaiUrutan() {
@@ -817,9 +950,11 @@
       catat('Urutan tidak bisa dimulai: belum ada jari terdaftar.', 'peringatan');
       return;
     }
+    if (laporan.urutan) laporan.urutan_sebelumnya.push(laporan.urutan);
     urutan = { butir: susunUrutan(), i: 0, ke: 0 };
-    laporan.urutan = { dimulai: new Date().toISOString(), butir: urutan.butir.length, selesai: null, dihentikan: null, dilewati: [] };
-    catat(`Urutan dimulai: ${urutan.butir.length} butir, masing-masing ${TEMPELAN_PER_BUTIR} tempelan.`, 'ok');
+    laporan.urutan = { dimulai: new Date().toISOString(), butir: urutan.butir.length, putaran: PUTARAN, selesai: null, dihentikan: null, dilewati: [] };
+    catat(`Urutan dimulai: ${urutan.butir.length} butir. Tiap relawan ${PUTARAN} putaran atas semua jarinya, `
+      + `lalu ${TEMPELAN_ASING} tempelan jari tidak terdaftar.`, 'ok');
     terapkanButir();
   }
 
@@ -832,11 +967,16 @@
     }
     $('#harap').value = urutan.butir[urutan.i].harap;
     tampilkanGiliran();
+    // Tanda sekilas bahwa jarinya berganti.
+    const giliran = $('#giliran');
+    giliran.classList.add('ganti');
+    setTimeout(() => giliran.classList.remove('ganti'), 1200);
   }
 
   function tampilkanGiliran(pesan) {
     $('#mulai-urutan').disabled = !!urutan;
     $('#lewati-urutan').disabled = !urutan;
+    $('#lewati-orang').disabled = !urutan;
     $('#henti-urutan').disabled = !urutan;
     $('#harap').disabled = !!urutan;
     const giliran = $('#giliran');
@@ -846,16 +986,20 @@
       return;
     }
     const b = urutan.butir[urutan.i];
-    giliran.textContent = `Sekarang: ${b.label}, tempelan ${urutan.ke + 1} dari ${TEMPELAN_PER_BUTIR}`
-      + (urutan.ke >= TEMPELAN_PER_BUTIR ? ' (menyelesaikan percobaan)' : '') + ` · butir ${urutan.i + 1} dari ${urutan.butir.length}`;
+    const posisi = ` · butir ${urutan.i + 1} dari ${urutan.butir.length}`;
+    giliran.textContent = b.harap === 'ASING'
+      ? `Sekarang: ${b.label}, tempelan ${urutan.ke + 1} dari ${TEMPELAN_ASING}${posisi}`
+      : `Sekarang: ${b.label} · putaran ${b.putaran} dari ${PUTARAN}`
+        + (urutan.ke > 0 ? ` · belum dikenali, ulangi jari yang sama (tempelan ${urutan.ke + 1} dari paling banyak ${TEMPELAN_PERCOBAAN})` : '')
+        + posisi;
     giliran.className = 'giliran';
   }
 
   // Dipanggil setelah tempelan yang dijawab jembatan (bukan galat).
   function majuUrutan() {
     urutan.ke++;
-    const percobaanBerjalan = urutan.butir[urutan.i].harap !== 'ASING' && percobaanAktif !== null;
-    if (urutan.ke >= TEMPELAN_PER_BUTIR && !percobaanBerjalan) {
+    const selesai = urutan.butir[urutan.i].harap === 'ASING' ? urutan.ke >= TEMPELAN_ASING : percobaanAktif === null;
+    if (selesai) {
       urutan.i++;
       urutan.ke = 0;
       terapkanButir();
@@ -870,6 +1014,21 @@
     laporan.urutan.dilewati.push({ label: b.label, harap: b.harap, tempelan: urutan.ke });
     catat(`Dilewati: ${b.label} (${urutan.ke} tempelan).`, 'peringatan');
     urutan.i++;
+    urutan.ke = 0;
+    terapkanButir();
+  }
+
+  function lewatiOrang() {
+    if (!urutan) return;
+    const orang = urutan.butir[urutan.i].orang;
+    const nama = orang.replace(/^uji:/, '');
+    let jumlah = 0;
+    while (urutan.i < urutan.butir.length && urutan.butir[urutan.i].orang === orang) {
+      urutan.i++;
+      jumlah++;
+    }
+    laporan.urutan.dilewati.push({ label: `${nama}: seluruh sisa giliran`, harap: null, butir: jumlah, tempelan: urutan.ke });
+    catat(`Dilewati: ${jumlah} butir sisa untuk ${nama}.`, 'peringatan');
     urutan.ke = 0;
     terapkanButir();
   }
@@ -894,7 +1053,9 @@
     }
     sibukIdentifikasi = true;
     const harap = $('#harap').value || null;
-    const butir = urutan ? { butir: urutan.i + 1, label: urutan.butir[urutan.i].label, tempelan: urutan.ke + 1 } : null;
+    const butir = urutan
+      ? { butir: urutan.i + 1, label: urutan.butir[urutan.i].label, putaran: urutan.butir[urutan.i].putaran, tempelan: urutan.ke + 1 }
+      : null;
     const { kode, data } = await panggil('POST', '/identifikasi', { format: s.format, sampel: s.teks, tantangan: tantangan() });
     const ujungKeUjung = Math.round((performance.now() - s.t0) * 10) / 10;
     sibukIdentifikasi = false;
@@ -911,7 +1072,13 @@
       diterima: data?.diterima ?? null, identitas: data?.identitas ?? null, skor: data?.skor ?? null,
       kandidat: data?.kandidat ?? null, waktu_jembatan_ms: data?.waktu_ms ?? null, ujung_ke_ujung_ms: ujungKeUjung,
       pesan: kode === 200 ? null : data?.message ?? null,
+      // Untuk menyelidiki tempelan yang gagal: apa yang sebenarnya ditangkap.
+      skor_probe_sebelumnya: data?.skor_probe_sebelumnya ?? null,
+      sampel: data?.sampel ?? null, dpi_galeri: data?.dpi ?? null,
+      kualitas: s.kualitas ?? null, piksel_gelap_persen: s.piksel_gelap_persen ?? null, panjang_teks: s.teks.length,
+      adc: s.adc ?? null,
     };
+    $('#gambar-identifikasi').replaceChildren(s.gambar());
     if (kode !== 200) {
       hitungan.galat++;
       besar.textContent = 'Galat ' + kode;
@@ -930,7 +1097,9 @@
       }
       rinci.textContent = `Kandidat: ${kandidat.map((k) => k.identitas + ' ' + k.skor).join(', ')} · jembatan ${data.waktu_ms.total} ms `
         + `(ekstraksi ${data.waktu_ms.ekstraksi}, cocok ${data.waktu_ms.cocok}) · ujung ke ujung ${ujungKeUjung} ms · `
-        + `${data.sampel.format} ${data.sampel.lebar}×${data.sampel.tinggi}, DPI galeri ${data.dpi}`;
+        + `${data.sampel.format} ${data.sampel.lebar}×${data.sampel.tinggi}, DPI alat ${data.sampel.dpi_alat ?? '—'}, DPI galeri ${data.dpi} · `
+        + `kualitas ${s.kualitas ?? '—'} · piksel gelap ${s.piksel_gelap_persen ?? '—'}% · `
+        + `mirip tempelan sebelumnya ${data.skor_probe_sebelumnya ?? '—'}`;
       hitung(harap, data);
       // Maju hanya kalau urutan masih di tempat yang sama dengan saat sampel
       // dikirim; "Lewati" di tengah permintaan sudah memajukannya.
@@ -968,7 +1137,7 @@
     } else if (data.diterima) {
       percobaan.salah_orang++;
       percobaanAktif = null;
-    } else if (percobaanAktif.ke >= 3) {
+    } else if (percobaanAktif.ke >= TEMPELAN_PERCOBAAN) {
       percobaan.gagal_3_kali++;
       percobaanAktif = null;
     }
@@ -1013,7 +1182,17 @@
   // yang jaraknya ≤ 0 tidak bisa diterapkan.
   let jarakDpi = null;
   let dpiTerbaik = null;
+  let dpiDisarankan = null;
   let dpiDipilih = false;
+
+  function pastikanPilihanDpi(dpi) {
+    const pilihan = $('#dpi-terapkan');
+    if ([...pilihan.options].some((o) => Number(o.value) === dpi)) return;
+    const baru = document.createElement('option');
+    baru.value = String(dpi);
+    baru.textContent = String(dpi);
+    pilihan.insertBefore(baru, [...pilihan.options].find((o) => Number(o.value) > dpi) ?? null);
+  }
 
   async function hitungKalibrasi() {
     const tombol = $('#hitung-kalibrasi');
@@ -1034,14 +1213,31 @@
     const terbaik = data.hasil.reduce((a, b) => (b.jarak > a.jarak ? b : a));
     jarakDpi = new Map(data.hasil.map((h) => [h.dpi, h.jarak]));
     dpiTerbaik = terbaik.dpi;
-    for (const o of $('#dpi-terapkan').options) {
-      const jarak = jarakDpi.get(Number(o.value));
-      o.textContent = jarak === undefined ? o.value : `${o.value} (jarak ${jarak}${Number(o.value) === dpiTerbaik ? ', terbaik' : ''})`;
-    }
-    $('#dpi-terapkan').value = String(dpiTerbaik);
+    // Selisih antar-DPI yang berdekatan (500, 508, 512) hanyalah derau: jarak
+    // dihitung dari skor terendah dan tertinggi, dan di uji 3 Oktober 2026
+    // tetangga terdekat berbeda sampai 20%, sedangkan DPI yang memang salah
+    // jatuh ke 55% atau kurang. DPI galeri yang sekarang, lalu DPI yang
+    // dilaporkan alat, didahulukan selama jaraknya minimal 70% dari yang terbaik.
+    const setara = (dpi) => jarakDpi.get(dpi) > 0 && jarakDpi.get(dpi) >= 0.7 * terbaik.jarak;
+    const dpiAlat = data.dpi_alat?.length === 1 ? data.dpi_alat[0] : null;
+    dpiDisarankan = setara(data.dpi_sekarang) ? data.dpi_sekarang : dpiAlat !== null && setara(dpiAlat) ? dpiAlat : terbaik.dpi;
+    $('#dpi-terapkan').replaceChildren(...data.hasil.map((h) => {
+      const o = document.createElement('option');
+      const tanda = [h.dpi === dpiTerbaik ? 'terbaik' : null, h.dpi === data.dpi_sekarang ? 'galeri' : null, h.dpi === dpiAlat ? 'alat' : null]
+        .filter(Boolean);
+      o.value = String(h.dpi);
+      o.textContent = `${h.dpi} (jarak ${h.jarak}${tanda.length ? ', ' + tanda.join(', ') : ''})`;
+      return o;
+    }));
+    $('#dpi-terapkan').value = String(dpiDisarankan);
     dpiDipilih = true;
-    catat(`Kalibrasi selesai: ${data.gambar} gambar dari ${data.identitas} identitas; DPI sekarang ${data.dpi_sekarang}. `
-      + `DPI terbaik ${dpiTerbaik} (jarak ${terbaik.jarak}) sudah dipilih.`, 'ok');
+    catat(`Kalibrasi selesai: ${data.gambar} gambar dari ${data.identitas} identitas. `
+      + (dpiDisarankan === data.dpi_sekarang
+        ? `DPI galeri ${data.dpi_sekarang} (jarak ${jarakDpi.get(data.dpi_sekarang)}) setara dengan yang terbaik `
+          + `(${dpiTerbaik}, jarak ${terbaik.jarak}); tidak perlu diganti.`
+        : `DPI galeri ${data.dpi_sekarang} (jarak ${jarakDpi.get(data.dpi_sekarang) ?? '—'}) sebaiknya diganti: `
+          + `${dpiDisarankan} (jarak ${jarakDpi.get(dpiDisarankan)}) sudah dipilih, klik "Terapkan DPI" dua kali.`),
+      dpiDisarankan === data.dpi_sekarang ? 'ok' : 'peringatan');
   }
 
   async function terapkanDpi() {
@@ -1049,12 +1245,14 @@
     const jarak = jarakDpi?.get(dpi);
     if (jarak !== undefined && jarak <= 0) {
       catat(`DPI ${dpi} tidak diterapkan: jaraknya ${jarak}, jadi skor jari sama dan jari beda bertumpang tindih. `
-        + `DPI terbaik ${dpiTerbaik}.`, 'galat');
+        + `DPI yang disarankan ${dpiDisarankan}.`, 'galat');
       return;
     }
-    if (dpiTerbaik !== null && dpi !== dpiTerbaik) catat(`DPI ${dpi} bukan yang terbaik menurut kalibrasi (${dpiTerbaik}).`, 'peringatan');
+    if (dpiDisarankan !== null && dpi !== dpiDisarankan) catat(`DPI ${dpi} bukan yang disarankan kalibrasi (${dpiDisarankan}).`, 'peringatan');
     const { kode, data } = await panggil('POST', '/kalibrasi', { terapkan: dpi });
-    laporan.penerapan_dpi.push({ waktu: new Date().toISOString(), dpi, terbaik: dpiTerbaik, jarak: jarak ?? null, kode, pesan: data?.message ?? null });
+    laporan.penerapan_dpi.push({
+      waktu: new Date().toISOString(), dpi, disarankan: dpiDisarankan, terbaik: dpiTerbaik, jarak: jarak ?? null, kode, pesan: data?.message ?? null,
+    });
     catat(kode === 200 ? `DPI galeri kini ${dpi}; ${data.templat} templat diekstrak ulang.` : 'Terapkan DPI: ' + (data?.message ?? kode),
       kode === 200 ? 'ok' : 'galat');
     await muatStatus();
@@ -1101,6 +1299,11 @@
       d.gagal++;
       catat('Detak gagal: ' + (data?.message ?? kode), 'galat');
     }
+    tampilkanDetak();
+  }
+
+  function tampilkanDetak() {
+    const d = laporan.detak;
     isiTabel($('#tabel-detak tbody'), [
       ['Berhasil', d.ok],
       ['Gagal', d.gagal, d.gagal ? 'galat' : ''],
@@ -1121,10 +1324,11 @@
       dibuat: new Date().toISOString(),
       peramban: navigator.userAgent,
       jembatan: s ? { versi: s.versi, mode: s.mode, perangkat: s.perangkat, waktu: s.waktu, alat: s.alat, galeri: s.galeri } : null,
-      adc: { terhubung: adc.terhubung, komunikasi_gagal: adc.komunikasi_gagal, pembaca: adc.pembaca, format_aktif: adc.format },
+      sesi: laporan.sesi,
+      adc: { terhubung: adc.terhubung, komunikasi_gagal: adc.komunikasi_gagal, pembaca: adc.pembaca, format_aktif: adc.format, mulai_ulang: adc.mulai_ulang },
       tangkap: laporan.tangkap,
       daftar: laporan.daftar,
-      identifikasi: { hitungan, percobaan, urutan: laporan.urutan, tempelan: laporan.identifikasi },
+      identifikasi: { hitungan, percobaan, urutan: laporan.urutan, urutan_sebelumnya: laporan.urutan_sebelumnya, tempelan: laporan.identifikasi },
       sampel_kembar: laporan.sampel_kembar,
       kalibrasi: laporan.kalibrasi,
       penerapan_dpi: laporan.penerapan_dpi,
@@ -1135,6 +1339,7 @@
     };
     $('#laporan').value = JSON.stringify(isi, null, 1);
     catat('Laporan disusun (' + $('#laporan').value.length + ' karakter).', 'ok');
+    simpan();
   }
 
   async function salinLaporan() {
@@ -1164,15 +1369,16 @@
     tombol.addEventListener('click', () => bukaTab(tombol.dataset.tab));
   }
   $('#muat-status').addEventListener('click', muatStatus);
-  $('#mulai-tangkap').addEventListener('click', mulaiTangkap);
+  $('#mulai-tangkap').addEventListener('click', () => mulaiTangkap(true));
   $('#henti-tangkap').addEventListener('click', hentiTangkap);
-  $('#format').addEventListener('change', () => { if (adc.menangkap) mulaiTangkap(); });
+  $('#format').addEventListener('change', () => { if (adc.menangkap) mulaiTangkap(true); });
   $('#relawan').addEventListener('change', kosongkanSlot);
   $('#jari').addEventListener('change', kosongkanSlot);
   $('#kosongkan-daftar').addEventListener('click', kosongkanSlot);
   $('#kirim-ulang').addEventListener('click', kirimUlang);
   $('#mulai-urutan').addEventListener('click', mulaiUrutan);
   $('#lewati-urutan').addEventListener('click', lewatiButir);
+  $('#lewati-orang').addEventListener('click', lewatiOrang);
   $('#henti-urutan').addEventListener('click', hentiUrutanManual);
   $('#hitung-kalibrasi').addEventListener('click', hitungKalibrasi);
   $('#dpi-terapkan').addEventListener('change', () => { dpiDipilih = true; });
@@ -1186,20 +1392,33 @@
   });
   $('#susun-laporan').addEventListener('click', susunLaporan);
   $('#salin-laporan').addEventListener('click', salinLaporan);
+  konfirmasiDuaKali($('#kosongkan-laporan'), kosongkanLaporan);
   konfirmasiDuaKali($('#hapus-uji'), hapusDataUji);
   $('#berkas-uji').addEventListener('change', async (e) => {
     for (const berkas of e.target.files) await sampelDariBerkas(berkas, berkas.name);
     e.target.value = '';
   });
 
+  pulihkan();
   tampilkanAdc();
   tampilkanSlot();
   tampilkanHitungan();
   tampilkanGiliran();
+  tampilkanJumlahTangkap();
+  tampilkanDetak();
   await muatStatus();
+  // Satu baris per pemuatan halaman, supaya terlihat kapan halaman dimuat
+  // ulang dan jembatan mana yang menjawab saat itu.
+  laporan.sesi.push({
+    dimuat: new Date().toISOString(), halaman: VERSI_HALAMAN,
+    jembatan: statusJembatan ? { versi: statusJembatan.versi, mode: statusJembatan.mode, perangkat: statusJembatan.perangkat } : null,
+  });
+  if (laporan.sesi.length > 50) laporan.sesi.splice(0, laporan.sesi.length - 50);
   await muatGaleri();
   mulaiAdc();
   setInterval(muatStatus, 15000);
+  setInterval(simpan, 2000);
+  window.addEventListener('pagehide', simpan);
 })();
 </script>
 </body>
