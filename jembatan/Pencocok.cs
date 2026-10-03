@@ -12,7 +12,9 @@
 // - SourceAFIS tidak tahan beda skala, jadi probe dan galeri harus diekstrak
 //   dengan DPI yang sama. DPI itu ditulis di kolom versi setiap rekaman,
 //   bersama versi pustaka, karena keduanya menentukan apakah dua templat bisa
-//   dibandingkan. Contoh: sourceafis-net-3.14.0-700.
+//   dibandingkan. Contoh: sourceafis-net-3.14.0-508.
+// - DPI galeri mengikuti alat: pendaftaran pertama di galeri kosong memakai
+//   DPI yang dilaporkan sampelnya. DPI itu bergantung driver, bukan pembaca.
 // - Identifikasi diterima kalau skor terbaik mencapai Ambang DAN cukup jauh di
 //   atas identitas kedua. Ambang 40 yang dianjurkan untuk 1:1 terlalu longgar
 //   untuk ratusan templat: setiap perbandingan membawa peluang salah-cocok.
@@ -48,12 +50,20 @@ sealed class Pencocok
     const double AmbangSatuLawanSatu = 40;
 
     public const int JumlahTempelan = 4;
-    // DPI galeri baru, dan galeri setelah data uji dihapus. 700 adalah DPI yang
-    // dilaporkan U.are.U 4500 lewat WebSDK, dan kalibrasi uji 3 Oktober 2026
-    // (17 jari, 102 pasangan sama-jari, 2.176 beda-jari) memisahkan jari sama
-    // dan jari beda paling lebar di 700: jarak 42,2, sedangkan di 500 hanya
-    // 19,5. Galeri yang sudah berisi tetap memakai DPI rekamannya.
-    const int DpiBawaan = 700;
+    // DPI galeri sebelum ada pendaftaran, dan DPI untuk sampel yang tidak
+    // membawa DPI (PNG). Pendaftaran pertama di galeri kosong menggantinya
+    // dengan DPI yang dilaporkan sampelnya; galeri yang sudah berisi tetap
+    // memakai DPI rekamannya.
+    //
+    // DPI bergantung driver, bukan pembaca. U.are.U 4500 yang sama melapor 700
+    // lewat driver DigitalPersona (500 × 550) dan 508 lewat driver WBF (320 ×
+    // 360). Kalibrasi 3 Oktober 2026 di kedua komputer membenarkan angka itu:
+    // dengan driver DigitalPersona 700 unggul (jarak 42,2); dengan driver WBF
+    // di PC kiosk 500 dan 512 unggul (109,7 dan 93,9), sedangkan 700 hanya
+    // 8,2. Jadi angka mati 700 dari versi 0.1.2 salah untuk PC kiosk.
+    const int DpiBawaan = 500;
+    const int DpiTerkecil = 250;
+    const int DpiTerbesar = 1200;
     static readonly int[] DpiKalibrasi = [500, 512, 600, 700, 800];
     static readonly int[] UkuranGaleriUkur = [50, 100, 500, 2000];
 
@@ -202,6 +212,13 @@ sealed class Pencocok
         }
         var waktuCocok = Stopwatch.GetElapsedTime(mulai) - waktuBaca - waktuEkstraksi;
 
+        // Diagnostik prototipe: kemiripan dengan tempelan sebelumnya, untuk
+        // melihat apakah tempelan berturut-turut memang jari yang sama.
+        var sebelumnya = _probeTerakhir;
+        double? skorSebelumnya = sebelumnya is not null && sebelumnya.Dpi == galeri.Dpi
+            ? Bulat(pencocok.Match(sebelumnya.Templat))
+            : null;
+
         var teratas = skor.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).Take(2).ToArray();
         var terbaik = teratas[0];
         var kedua = teratas.Length > 1 ? teratas[1].Value : (double?)null;
@@ -225,6 +242,7 @@ sealed class Pencocok
             selisih = Selisih,
             dpi = galeri.Dpi,
             sampel = InfoSampel(sampel),
+            skor_probe_sebelumnya = skorSebelumnya,
             waktu_ms = new { baca = Ms(waktuBaca), ekstraksi = Ms(waktuEkstraksi), cocok = Ms(waktuCocok), total = Ms(total) },
             pesan = tanda?.Pesan,
             tanda_tangan = tanda?.Hmac,
@@ -272,12 +290,16 @@ sealed class Pencocok
         lock (_kunciUbah)
         {
             var galeri = _galeri;
+            // Galeri kosong mengikuti DPI yang dilaporkan alat. Galeri yang
+            // sudah berisi tetap memakai DPI-nya, supaya templat lama dan
+            // baru sebanding.
+            var dpi = galeri.Entri.IsEmpty ? DpiSampel(sampel) ?? galeri.Dpi : galeri.Dpi;
             var templat = new FingerprintTemplate[JumlahTempelan];
             for (var i = 0; i < JumlahTempelan; i++)
             {
                 try
                 {
-                    templat[i] = Ekstrak(sampel[i], galeri.Dpi);
+                    templat[i] = Ekstrak(sampel[i], dpi);
                 }
                 catch (SampelTidakSahException e)
                 {
@@ -324,7 +346,7 @@ sealed class Pencocok
                                    new { identitas_lain = identitasLain, skor = Bulat(skorLain) });
             }
 
-            var versi = AwalanVersi + galeri.Dpi;
+            var versi = AwalanVersi + dpi;
             RekamanTemplat[] rekamanBaru;
             try
             {
@@ -341,7 +363,12 @@ sealed class Pencocok
                 .Concat(rekamanBaru.Select((r, i) => new Entri(identitas, jari, i + 1, templat[i], r)))
                 .ToImmutableArray();
             TulisGaleri(entriBaru);
-            _galeri = galeri with { Entri = entriBaru };
+            _galeri = new Galeri(dpi, entriBaru);
+            if (dpi != galeri.Dpi)
+            {
+                _probeTerakhir = null;
+                _log.LogWarning("DPI galeri mengikuti alat: {Dpi} (sebelumnya {Lama}).", dpi, galeri.Dpi);
+            }
             for (var i = 0; i < JumlahTempelan; i++)
             {
                 _gambar[(identitas, jari, i + 1)] = sampel[i];
@@ -359,7 +386,7 @@ sealed class Pencocok
                 diganti,
                 skor_keserasian = keserasian.Select(s => Bulat(s)),
                 skor_jari_lain_tertinggi = Bulat(skorLain),
-                dpi = galeri.Dpi,
+                dpi,
                 sampel = InfoSampel(sampel[0]),
                 waktu_ms = Ms(Stopwatch.GetElapsedTime(mulai)),
             });
@@ -383,12 +410,16 @@ sealed class Pencocok
             {
                 return Hasil.Galat(409, "Kalibrasi butuh gambar pendaftaran minimal dua identitas dari sesi ini.");
             }
-            var hasil = DpiKalibrasi.Select(dpi => HitungKalibrasi(dpi, gambar)).ToArray();
+            // Calon: daftar tetap, ditambah DPI yang dilaporkan alat untuk
+            // gambar sesi ini.
+            var dpiAlat = gambar.Select(g => g.Value.DpiAlat).OfType<int>().Where(DpiMasukAkal).Distinct().Order().ToArray();
+            var hasil = DpiKalibrasi.Concat(dpiAlat).Distinct().Order().Select(dpi => HitungKalibrasi(dpi, gambar)).ToArray();
             _log.LogInformation("Kalibrasi DPI dari {Gambar} gambar.", gambar.Length);
             return Hasil.Oke(new
             {
                 status = "ok",
                 dpi_sekarang = _galeri.Dpi,
+                dpi_alat = dpiAlat,
                 gambar = gambar.Length,
                 identitas = gambar.Select(g => g.Key.Identitas).Distinct().Count(),
                 hasil,
@@ -398,9 +429,9 @@ sealed class Pencocok
 
     Hasil Terapkan(int dpiBaru)
     {
-        if (!DpiKalibrasi.Contains(dpiBaru))
+        if (!DpiMasukAkal(dpiBaru))
         {
-            return Hasil.Galat(400, "DPI harus salah satu dari " + string.Join(", ", DpiKalibrasi) + ".");
+            return Hasil.Galat(400, $"DPI harus antara {DpiTerkecil} dan {DpiTerbesar}.");
         }
         var galeri = _galeri;
         var tanpaGambar = galeri.Entri
@@ -597,9 +628,19 @@ sealed class Pencocok
 
     static int? DpiDariVersi(string versi) =>
         versi.StartsWith(AwalanVersi, StringComparison.Ordinal)
-        && int.TryParse(versi.AsSpan(AwalanVersi.Length), out var dpi) && DpiKalibrasi.Contains(dpi)
+        && int.TryParse(versi.AsSpan(AwalanVersi.Length), out var dpi) && DpiMasukAkal(dpi)
             ? dpi
             : null;
+
+    static bool DpiMasukAkal(int dpi) => dpi is >= DpiTerkecil and <= DpiTerbesar;
+
+    // DPI yang dilaporkan alat, kalau keempat sampel menyebut angka yang sama
+    // dan angkanya masuk akal. PNG tidak membawa DPI.
+    static int? DpiSampel(Sampel[] sampel)
+    {
+        var dpi = sampel[0].DpiAlat;
+        return dpi is int nilai && DpiMasukAkal(nilai) && sampel.All(s => s.DpiAlat == dpi) ? nilai : null;
+    }
 
     static string VersiPustaka()
     {

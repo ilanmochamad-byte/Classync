@@ -71,7 +71,7 @@ Get-FileHash .\jembatan-sidik-jari.exe -Algorithm SHA256
 ```
 
 Panel Jembatan di halaman uji menampilkan versi `.exe` yang sedang jalan,
-berbentuk `0.1.2+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
+berbentuk `0.1.3+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
 setelah semua perubahan di-commit, supaya commit itu memang isi paketnya.
 
 ## Uji di PC kiosk
@@ -81,10 +81,21 @@ ada restart. Sisihkan sekitar 3 jam. Pakai akun admin. Siapkan 3–4 relawan
 dewasa yang sudah menandatangani persetujuan uji coba; tidak ada siswa yang
 ikut.
 
-Uji 3 Oktober 2026 dijalankan di komputer lain dengan pembaca sekolah. Itu
-cukup untuk mencoba alur halaman, tetapi kriteria lanjut ke 4.2 dinilai di PC
-kiosk: driver dan ADC (fase A), ukur waktu (fase B langkah 5), dan seluruh
-fase C bergantung pada PC itu sendiri.
+Pembaca sekolah sudah diuji dengan dua driver, dan hasilnya berbeda. Yang
+menentukan ukuran dan DPI gambar adalah driver, bukan pembacanya:
+
+| | Driver DigitalPersona | Driver WBF |
+|---|---|---|
+| Dipakai di | komputer lain (uji 1 dan 3 Oktober 2026) | PC kiosk (uji 3 Oktober 2026) |
+| Sampel Raw | 500 × 550, 700 DPI, 12 byte ekor bernilai nol | 320 × 360, 508 DPI, tanpa ekor |
+| Pembaca menurut ADC | Optical, UID tetap | Unknown, UID berganti tiap alat dicolok |
+| Penangkapan | terus-menerus | berhenti setelah tiap tempelan; halaman memulainya lagi |
+| Kalibrasi 3 Oktober | 700 terbaik (jarak 42,2) | 500 terbaik (jarak 109,7); 700 hanya 8,2 |
+
+PC kiosk memakai driver WBF yang dipasang Windows sendiri, dan pembacanya
+langsung tampil di ADC. Uji di komputer lain cukup untuk mencoba alur halaman,
+tetapi kriteria lanjut ke 4.2 dinilai di PC kiosk. Mengganti driver mengubah
+ukuran dan DPI gambar, jadi semua jari harus didaftarkan ulang.
 
 ### Fase A: driver, ADC, dan jembatan di jendela konsol
 
@@ -96,14 +107,10 @@ fase C bergantung pada PC itu sendiri.
    tidak ada perangkat lunak DigitalPersona, Altus, atau bawaan "Solution" di
    Apps & features; ADC tidak bisa berdampingan dengan produk DigitalPersona
    lain.
-3. Kalau sudah ada driver WBF (dipasang Windows Update): Uninstall device,
-   centang "Delete the driver software for this device", lalu cabut alat.
-4. Pasang driver non-WBF 4.1.1.221 dari `hidglobal.com/drivers/49061`. Colok
-   alat, lalu pastikan versinya di Device Manager.
-5. Pasang HID Authentication Device Client 5.2.0 (64-bit) dari
+3. Pasang HID Authentication Device Client 5.2.0 (64-bit) dari
    `digitalpersona.hidglobal.com/lite-client/`, lalu restart. Di
    `services.msc`, catat nama layanan HID dan pastikan statusnya Running.
-6. Salin paket ke `C:\JembatanUji\`, lalu dari PowerShell di folder itu:
+4. Salin paket ke `C:\JembatanUji\`, lalu dari PowerShell di folder itu:
 
    ```powershell
    .\jembatan-sidik-jari.exe
@@ -111,18 +118,25 @@ fase C bergantung pada PC itu sendiri.
 
    Jendela ini menampilkan log jembatan; menutupnya menghentikan jembatan.
    Buka `http://127.0.0.1:47890/` di Chrome, lalu klik halamannya: WebSDK
-   hanya mengirim sampel ke jendela yang sedang aktif. Kalau panel Authentication
-   Device Client menampilkan pembaca, lanjut ke fase B.
-7. Kalau pembaca tidak muncul: hapus driver non-WBF seperti langkah 3, pasang
-   driver WBF 5.0.0.5 dari `hidglobal.com/drivers/39477`, restart, jalankan
-   Repair pada ADC di Apps & features, lalu ulangi langkah 6.
-8. Kalau keduanya gagal: berhenti, kirim tangkapan layar Device Manager dan
+   hanya mengirim sampel ke jendela yang sedang aktif. Kalau panel
+   Authentication Device Client menampilkan pembaca, lanjut ke fase B dengan
+   driver yang ada. Di PC kiosk itu driver WBF bawaan Windows.
+5. Kalau pembaca tidak muncul dengan driver WBF: di Device Manager, Uninstall
+   device dengan centang "Delete the driver software for this device", cabut
+   alat, pasang driver DigitalPersona 4.1.1.221 dari
+   `hidglobal.com/drivers/49061`, colok alat, lalu ulangi langkah 4.
+6. Kalau pembaca tidak muncul dengan driver DigitalPersona: hapus driver itu
+   dengan cara yang sama, pasang driver WBF 5.0.0.5 dari
+   `hidglobal.com/drivers/39477`, restart, jalankan Repair pada ADC di Apps &
+   features, lalu ulangi langkah 4.
+7. Kalau keduanya gagal: berhenti, kirim tangkapan layar Device Manager dan
    log halaman, lalu pulihkan dari titik pemulihan.
-9. Setelah salah satu driver terbukti: di `gpedit.msc`, Computer Configuration >
+8. Setelah salah satu driver terbukti: di `gpedit.msc`, Computer Configuration >
    Administrative Templates > Windows Components > Windows Update, aktifkan
    "Do not include drivers with Windows Updates" (di sebagian versi ada di
    subfolder "Manage updates offered from Windows Update"). Tanpa ini, Windows
-   Update bisa mengganti driver diam-diam.
+   Update bisa mengganti driver diam-diam, dan gambar dari driver lain tidak
+   cocok dengan galeri yang sudah ada.
 
 Folder data `C:\ProgramData\JembatanSidikJari` dibuat saat jembatan pertama
 jalan. Buka `kunci.bin` di dalamnya dengan Notepad (sebagai admin): isinya
@@ -136,39 +150,54 @@ berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
 
 1. **Tangkap.** Lima tempelan dengan format Raw, lalu lima dengan PNG (pilih di
    panel Authentication Device Client). Periksa ukuran, DPI dari alat, dan
-   baris "Panjang piksel". Yang diharapkan dari U.are.U 4500, terukur dengan
-   pembaca sekolah pada 1 dan 3 Oktober 2026:
+   baris "Panjang piksel". Yang diharapkan bergantung driver:
 
-   - Raw: ukuran 500 × 550, DPI dari alat 700, dan "Panjang piksel" berbunyi
-     `275012 = lebar × tinggi + 12 byte ekor`. Baris "Byte ekor
-     (heksadesimal)" berisi dua belas `00`.
-   - PNG: ukuran 500 × 550. Baris DPI, panjang piksel, dan byte ekor kosong.
+   - Driver WBF: ukuran 320 × 360, DPI dari alat 508, "Panjang piksel"
+     berbunyi `115200 = lebar × tinggi`, dan baris byte ekor kosong.
+   - Driver DigitalPersona: ukuran 500 × 550, DPI dari alat 700, "Panjang
+     piksel" berbunyi `275012 = lebar × tinggi + 12 byte ekor`, dan baris
+     "Byte ekor (heksadesimal)" berisi dua belas `00`.
+   - PNG: ukurannya sama dengan Raw. Baris DPI, panjang piksel, dan byte ekor
+     kosong.
 
    Kalau "Panjang piksel" merah dengan tulisan TIDAK, jembatan akan menolak
    sampel Raw itu. Berhenti di sini dan kirim tangkapan layarnya.
 2. **Daftar.** Mulai dari galeri kosong: kalau masih ada data uji lama, klik
-   "Hapus semua data uji" di tab Laporan (klik dua kali), supaya galeri baru
-   mulai dari 700 DPI. Format pindah sendiri ke Raw saat tab Daftar dibuka.
-   Setiap relawan mendaftarkan 6 jari (telunjuk, tengah, manis; kanan dan
-   kiri), 4 tempelan per jari. Periksa pilihan Jari sebelum menempel: tabel
-   galeri harus memuat 6 jari per relawan. Coba daftarkan ulang jari R1
-   telunjuk kanan dengan kode lain: harus ditolak sebagai jari ganda.
-3. **Kalibrasi & ukur.** "Hitung kalibrasi". Halaman memilih sendiri DPI
-   dengan "Jarak" terbesar dan menolak DPI yang jaraknya ≤ 0. Uji 3 Oktober
-   memilih 700, sama dengan DPI awal galeri; kalau yang terpilih tetap 700,
-   tidak ada yang perlu diterapkan. Kalau yang terpilih DPI lain, klik
-   "Terapkan DPI" dua kali. Kerjakan sebelum jembatan dimulai ulang: gambar
-   pendaftaran hanya ada di memori.
+   "Hapus semua data uji" di tab Laporan (klik dua kali). Pendaftaran pertama
+   di galeri kosong menetapkan DPI galeri dari DPI alat, dan hasil pendaftaran
+   menyebut "DPI galeri …": angkanya harus sama dengan "DPI dari alat" di tab
+   Tangkap. Format pindah sendiri ke Raw saat tab Daftar dibuka. Setiap
+   relawan mendaftarkan 6 jari (telunjuk, tengah, manis; kanan dan kiri), 4
+   tempelan per jari. Periksa pilihan Jari sebelum menempel: tabel galeri
+   harus memuat 6 jari per relawan. Coba daftarkan ulang jari R1 telunjuk
+   kanan dengan kode lain: harus ditolak sebagai jari ganda.
+
+   Kalau muncul peringatan merah "DPI alat …, tetapi DPI galeri …", galeri itu
+   dibuat dengan driver atau versi lain. Hapus semua data uji, lalu daftar
+   ulang.
+3. **Kalibrasi & ukur.** "Hitung kalibrasi". Halaman memilih DPI sendiri dan
+   menolak DPI yang jaraknya ≤ 0. Kalau catatan kejadian berbunyi "tidak perlu
+   diganti", biarkan. Kalau berbunyi "sebaiknya diganti", klik "Terapkan DPI"
+   dua kali. Kerjakan sebelum jembatan dimulai ulang: gambar pendaftaran hanya
+   ada di memori.
 4. **Identifikasi.** Klik "Mulai urutan", lalu ikuti tulisan "Sekarang: …".
-   Halaman yang memilih "Yang menempel sekarang" dan menghitung tempelannya:
-   setiap jari terdaftar 5 tempelan, lalu setiap relawan menempelkan jempol
-   atau kelingking 5 kali sebagai jari tidak terdaftar. Kalau seorang relawan
-   berhalangan, pakai "Lewati". Sampel hanya dihitung selama tab Identifikasi
+   Urutannya berputar: setiap relawan melewati semua jarinya lima putaran,
+   satu tempelan per jari per putaran. Kalau halaman meminta "ulangi jari yang
+   sama", tempelkan jari itu lagi; setelah tiga kali gagal halaman pindah
+   sendiri. Sesudah lima putaran, relawan menempelkan jempol atau kelingking
+   5 kali sebagai jari tidak terdaftar. Kalau seorang relawan berhalangan,
+   pakai "Lewati relawan ini". Sampel hanya dihitung selama tab Identifikasi
    terbuka.
-5. **Kalibrasi & ukur.** "Ukur waktu 1:N", sebaiknya setelah beberapa
+5. **Identifikasi, satu jari 8 kali.** Setelah urutan selesai, pilih satu jari
+   terdaftar di "Yang menempel sekarang", lalu tempelkan jari itu 8 kali
+   berturut-turut. Perhatikan gambar di bawah hasil dan angka "mirip tempelan
+   sebelumnya". Pada uji 3 Oktober di PC kiosk, tempelan kelima dan seterusnya
+   pada jari yang sama selalu gagal, dan sebabnya belum diketahui. Rekaman
+   langkah inilah yang akan menunjukkannya.
+6. **Kalibrasi & ukur.** "Ukur waktu 1:N", sebaiknya setelah beberapa
    identifikasi. Angkanya hanya berlaku untuk komputer tempat uji berjalan.
-6. **Identifikasi.** "Kirim ulang sampel terakhir": harus ditolak (409).
-7. **Detak.** "Detak sekarang". Cabut alat, detak lagi: status alat harus
+7. **Identifikasi.** "Kirim ulang sampel terakhir": harus ditolak (409).
+8. **Detak.** "Detak sekarang". Cabut alat, detak lagi: status alat harus
    berubah. Colok kembali. Nyalakan "Otomatis tiap 60 detik" selama 30 menit,
    dengan halaman dan jendela konsol tetap terbuka.
 
@@ -225,8 +254,10 @@ berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
 
 1. Di halaman uji, tab Laporan: "Susun laporan", "Salin", lalu kirim ke
    Claude. Isinya hanya angka dan metadata: tanpa gambar, templat, kunci, atau
-   nama.
-2. "Hapus semua data uji" (klik dua kali).
+   nama. Catatannya disimpan di peramban, jadi tetap utuh walau halaman dimuat
+   ulang atau jembatan berpindah dari konsol ke layanan.
+2. "Hapus semua data uji" (klik dua kali), lalu "Kosongkan laporan" (klik dua
+   kali).
 3. Dari PowerShell admin di folder paket:
 
    ```powershell
@@ -245,6 +276,14 @@ berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
 - Jari tidak terdaftar yang diterima: 0.
 - Orang dikenali pada tempelan pertama ≥ 90%, dan dalam tiga tempelan ≥ 99%.
 - Ujung ke ujung di PC kiosk ≤ 1 detik pada galeri 500 templat.
+
+Keadaan per 3 Oktober 2026, dari uji di PC kiosk dengan driver WBF:
+
+- Waktu terpenuhi: galeri 500 templat butuh median 80 ms (p95 90 ms) dan
+  ekstraksi 21 ms, di Windows 10 build 19045 dengan 4 prosesor.
+- Salah orang 0 dan jari tidak terdaftar yang diterima 0, pada 96 tempelan.
+- Tingkat pengenalan belum bisa dinilai. Galeri uji itu masih memakai 700 DPI,
+  dan tempelan kelima dan seterusnya pada jari yang sama selalu gagal.
 
 ## Titik mundur
 
@@ -290,13 +329,15 @@ Halaman meneruskan sampel dari WebSDK apa adanya; jembatan yang membacanya.
   `{Data, Format}`. `Data` di dalamnya adalah piksel 8-bit baris demi baris
   (base64url), dan `Format` memuat `iWidth`, `iHeight`, dan `iXdpi`. Struktur
   ini tidak didokumentasikan HID; yang tertulis di sini hasil pengukuran.
-- **Ekor:** pikselnya boleh diikuti byte yang bukan gambar. U.are.U 4500
-  mengirim 500 × 550 piksel ditambah 12 byte di akhir (275.012 byte); pada
-  uji 3 Oktober isinya selalu nol. Jembatan menerima kelebihan yang kurang
-  dari sisi terpendek gambar, dan hanya memakai lebar × tinggi byte pertama,
-  juga untuk penjaga sampel kembar. Data yang kurang, atau yang lebihnya
-  sepanjang sisi terpendek atau lebih, ditolak: itu tanda `Format` tidak
-  menggambarkan datanya.
+  Ukuran dan DPI-nya bergantung driver: 320 × 360 pada 508 DPI lewat WBF, dan
+  500 × 550 pada 700 DPI lewat driver DigitalPersona.
+- **Ekor:** pikselnya boleh diikuti byte yang bukan gambar. Lewat driver
+  DigitalPersona, U.are.U 4500 mengirim 12 byte bernilai nol setelah 500 × 550
+  piksel (275.012 byte). Lewat WBF tidak ada ekor. Jembatan menerima kelebihan
+  yang kurang dari sisi terpendek gambar, dan hanya memakai lebar × tinggi
+  byte pertama, juga untuk penjaga sampel kembar. Data yang kurang, atau yang
+  lebihnya sepanjang sisi terpendek atau lebih, ditolak: itu tanda `Format`
+  tidak menggambarkan datanya.
 - **PNG:** base64url berkas PNG. Hanya untuk prototipe.
 
 ### Data
@@ -310,8 +351,12 @@ Di `C:\ProgramData\JembatanSidikJari` (di Mac: folder `--data`):
 - `templat.json`: templat terenkripsi AES-256-GCM, satu rekaman per tempelan,
   terikat pada `SJ1|templat|identitas|jari|urutan|versi`. Rekaman yang
   dipindah ke identitas lain gagal didekripsi. Kolom `versi` memuat versi
-  SourceAFIS dan DPI ekstraksi, misalnya `sourceafis-net-3.14.0-700`. Galeri
-  baru mulai dari 700 DPI; galeri yang sudah berisi memakai DPI rekamannya.
+  SourceAFIS dan DPI ekstraksi, misalnya `sourceafis-net-3.14.0-508`.
+
+DPI galeri mengikuti alat. Pendaftaran pertama di galeri kosong memakai DPI
+yang dilaporkan sampelnya. Sebelum itu, dan untuk sampel tanpa DPI seperti
+PNG, jembatan memakai 500. Galeri yang sudah berisi memakai DPI rekamannya,
+dan hanya berubah lewat "Terapkan DPI".
 
 Gambar sidik jari tidak pernah ditulis ke disk. Gambar pendaftaran dan probe
 identifikasi terakhir hanya disimpan di memori, untuk kalibrasi dan ukur waktu.
@@ -346,9 +391,13 @@ hash_hmac('sha256', $pesan, hex2bin('000102030405060708090a0b0c0d0e0f10111213141
 Identifikasi diterima kalau skor terbaik ≥ 50 dan unggul ≥ 10 atas identitas
 kedua. Pendaftaran memakai ambang 1:1 SourceAFIS (40) untuk keserasian
 tempelan dan untuk mencari jari ganda. Angka 50 dan 10 adalah nilai awal
-prototipe; angka akhirnya dipilih dari laporan uji di PC kiosk. Pada
-kalibrasi 3 Oktober di 700 DPI, skor sama-jari terendah 74,5 dan beda-jari
-tertinggi 32,3.
+prototipe; angka akhirnya dipilih dari laporan uji di PC kiosk.
+
+Kalibrasi 3 Oktober memberi jarak yang lebar di kedua driver. Di PC kiosk pada
+500 DPI, skor sama-jari terendah 126,7 dan beda-jari tertinggi 17. Dengan
+driver DigitalPersona pada 700 DPI, angkanya 74,5 dan 32,3. Ambang jangan
+diturunkan ke 40: pada uji identifikasi di PC kiosk, telunjuk kiri pernah
+mendapat skor 41,3 terhadap telunjuk kanan orang yang sama.
 
 ## Mengubah halaman uji
 
@@ -382,7 +431,10 @@ Harus dicabut atau diubah sebelum dipakai untuk siswa (4.2 sampai 4.4):
 - Rute `/kalibrasi`, `/ukur`, `/hapus-uji`, dan `/galeri`, serta halaman uji
   di `/` beserta pemilih berkas mode pengembangan.
 - Identitas `uji:` di `Brankas.cs`.
-- Probe identifikasi terakhir yang disimpan di memori untuk `/ukur`.
+- Probe identifikasi terakhir yang disimpan di memori untuk `/ukur`, dan
+  `skor_probe_sebelumnya` di jawaban `/identifikasi`: kemiripan dengan
+  tempelan sebelumnya, hanya untuk menyelidiki tempelan yang gagal.
+- Catatan laporan yang disimpan halaman uji di `localStorage` peramban.
 - Format PNG; di produksi hanya Raw.
 - Ambang 50 dan selisih 10, diganti angka dari laporan uji.
 - Identifikasi dari halaman kiosk, yang baru dibuka di 4.4.
