@@ -14,7 +14,7 @@
   diubah, hash-nya harus dihitung ulang (lihat README.md), atau peramban
   menolak menjalankannya.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-4gH57zdNHz0931d+FUhdXducUIDqxuNeVNSj92IMDqU=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-yHZswVg0Z0NfwVq7ex410z7gYzEyb8MJK9hS8Sr/S3Y=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
 <title>Uji jembatan sidik jari</title>
 <style>
   :root { --biru: #1d4ed8; --hijau: #15803d; --merah: #b91c1c; --kuning: #a16207; --abu: #6b7280; --garis: #d1d5db; }
@@ -42,6 +42,7 @@
   .peringatan { color: var(--kuning); }
   .redup { color: var(--abu); }
   .hasil-besar { font-size: 28px; font-weight: 700; margin: 8px 0; }
+  .giliran { font-size: 20px; font-weight: 700; margin: 8px 0; }
   .baris { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
   .log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; background: #0b1020; color: #e5e7eb; border-radius: 6px; padding: 8px; height: 200px; overflow: auto; white-space: pre-wrap; }
   .log .ok { color: #86efac; }
@@ -128,7 +129,7 @@
       <span id="identitas-daftar" class="redup"></span>
       <button id="kosongkan-daftar">Kosongkan tempelan</button>
     </div>
-    <p class="redup">Tempelkan jari yang sama empat kali, dengan posisi sedikit berbeda. Setelah tempelan keempat, pendaftaran dikirim otomatis.</p>
+    <p class="redup">Tempelkan jari yang sama empat kali, dengan posisi sedikit berbeda. Setelah tempelan keempat, pendaftaran dikirim otomatis. Pendaftaran hanya memakai format Raw; formatnya pindah sendiri ke Raw saat tab ini dibuka.</p>
     <div id="slot-daftar"></div>
     <p id="hasil-daftar"></p>
     <table id="tabel-galeri"></table>
@@ -137,10 +138,14 @@
   <section class="kartu" data-tab="identifikasi" hidden>
     <h2>Identifikasi 1:N</h2>
     <div class="baris">
+      <button id="mulai-urutan">Mulai urutan</button>
+      <button id="lewati-urutan" disabled>Lewati</button>
+      <button id="henti-urutan" disabled>Hentikan urutan</button>
       <label>Yang menempel sekarang <select id="harap"></select></label>
       <button id="kirim-ulang">Kirim ulang sampel terakhir</button>
     </div>
-    <p class="redup">Pilih jari yang akan ditempel sebelum menempel, supaya hitungan di bawah benar. Untuk jari yang tidak didaftarkan (jempol, kelingking), pilih "Jari tidak terdaftar".</p>
+    <div id="giliran" class="giliran redup">Klik "Mulai urutan".</div>
+    <p class="redup">Dalam urutan, setiap jari terdaftar ditempel 5 kali, lalu setiap relawan menempelkan jari yang tidak terdaftar (jempol atau kelingking) 5 kali. Halaman yang memilih "Yang menempel sekarang"; ikuti saja tulisan di atas. Tanpa urutan, pilih sendiri sebelum setiap tempelan. Identifikasi hanya memakai format Raw.</p>
     <div id="hasil-identifikasi" class="hasil-besar redup">Tempelkan jari.</div>
     <p id="rincian-identifikasi" class="redup"></p>
     <table id="tabel-hitungan"><tbody></tbody></table>
@@ -152,7 +157,8 @@
       <button id="hitung-kalibrasi">Hitung kalibrasi</button>
       <label>DPI
         <select id="dpi-terapkan">
-          <option>500</option><option>512</option><option>600</option><option>700</option><option>800</option>
+          <option value="500">500</option><option value="512">512</option><option value="600">600</option>
+          <option value="700">700</option><option value="800">800</option>
         </select>
       </label>
       <button id="terapkan-dpi">Terapkan DPI</button>
@@ -194,14 +200,14 @@
 <script>
 'use strict';
 (async () => {
-  const VERSI_HALAMAN = '0.1.1';
+  const VERSI_HALAMAN = '0.1.2';
   const $ = (pemilih) => document.querySelector(pemilih);
 
   // ---------- Catatan untuk laporan dan log di layar ----------
 
   const laporan = {
     tangkap: [], daftar: [], identifikasi: [], sampel_kembar: [],
-    kalibrasi: null, penerapan_dpi: [], ukur: null,
+    kalibrasi: null, penerapan_dpi: [], ukur: null, urutan: null,
     detak: { ok: 0, gagal: 0, alat_1: 0, alat_0: 0, terakhir: null },
     csp_dilanggar: [], galat: [],
   };
@@ -312,6 +318,9 @@
     }
     statusJembatan = data;
     const g = data.galeri ?? {};
+    // Sebelum kalibrasi atau pilihan pengguna, pemilih DPI mengikuti DPI galeri,
+    // supaya "Terapkan DPI" tidak diam-diam memakai pilihan pertama.
+    if (!dpiDipilih && g.dpi) $('#dpi-terapkan').value = String(g.dpi);
     const a = data.alat ?? {};
     isiTabel($('#tabel-jembatan tbody'), [
       ['Versi', data.versi],
@@ -601,6 +610,10 @@
   let tabAktif = 'tangkap';
 
   function arahkan(sampel) {
+    if ((tabAktif === 'daftar' || tabAktif === 'identifikasi') && sampel.format !== 'raw') {
+      catat(`Sampel ${sampel.format} diabaikan: pendaftaran dan identifikasi hanya memakai Raw.`, 'galat');
+      return;
+    }
     if (tabAktif === 'tangkap') return terimaTangkap(sampel);
     if (tabAktif === 'daftar') return terimaDaftar(sampel);
     if (tabAktif === 'identifikasi') return terimaIdentifikasi(sampel);
@@ -611,7 +624,20 @@
     tabAktif = nama;
     for (const t of document.querySelectorAll('.tab button')) t.setAttribute('aria-selected', String(t.dataset.tab === nama));
     for (const s of document.querySelectorAll('section[data-tab]')) s.hidden = s.dataset.tab !== nama;
-    if (nama === 'daftar' || nama === 'identifikasi') muatGaleri();
+    if (nama === 'daftar' || nama === 'identifikasi') {
+      pastikanRaw();
+      muatGaleri();
+    }
+  }
+
+  // Pendaftaran dan identifikasi memakai Raw, seperti di produksi. PNG hanya
+  // untuk tab Tangkap. Uji 3 Oktober 2026 mendaftarkan hampir semua jari
+  // dengan PNG karena formatnya tertinggal setelah tangkap.
+  function pastikanRaw() {
+    if ($('#format').value === 'raw') return;
+    $('#format').value = 'raw';
+    catat('Format diganti ke Raw: pendaftaran dan identifikasi hanya memakai Raw.', 'peringatan');
+    if (adc.menangkap) mulaiTangkap();
   }
 
   // ---------- Tangkap ----------
@@ -751,11 +777,115 @@
 
   let sibukIdentifikasi = false;
   let sampelTerakhir = null;
-  const hitungan = { tempelan: 0, benar: 0, salah_orang: 0, tidak_dikenali: 0, asing_ditolak: 0, asing_diterima: 0, tanpa_pilihan: 0, galat: 0 };
+  // Di produksi identitas adalah orang (siswa), jadi jari lain dari orang yang
+  // sama tetap identifikasi yang benar. Di halaman ini identitas per jari
+  // (uji:R1-TK), jadi jari tepat dan jari lain dari orang yang sama dihitung
+  // terpisah; SALAH ORANG hanya kalau orangnya berbeda.
+  const hitungan = { tempelan: 0, benar: 0, jari_lain_orang_sama: 0, salah_orang: 0, tidak_dikenali: 0, asing_ditolak: 0, asing_diterima: 0, tanpa_pilihan: 0, galat: 0 };
   // Satu percobaan: tempelan berturut-turut untuk jari yang sama, sampai
-  // dikenali, salah orang, atau tiga kali gagal.
+  // orangnya dikenali, salah orang, atau tiga kali gagal.
   const percobaan = { dikenali_ke_1: 0, dikenali_ke_2: 0, dikenali_ke_3: 0, gagal_3_kali: 0, salah_orang: 0, ditinggalkan: 0 };
   let percobaanAktif = null;
+
+  const orangDari = (identitas) => /^(uji:[^-]+)-/.exec(identitas ?? '')?.[1] ?? identitas ?? null;
+
+  // Urutan: halaman yang menentukan jari yang harus ditempel, supaya label
+  // setiap tempelan benar. Uji 3 Oktober 2026 kehilangan labelnya karena
+  // pilihan "yang menempel" tertinggal sama untuk 22 tempelan. Setiap butir
+  // ditempel 5 kali; kalau percobaan masih berjalan setelah tempelan kelima,
+  // butir itu diteruskan sampai percobaannya selesai.
+  const TEMPELAN_PER_BUTIR = 5;
+  const URUTAN_JARI = ['TK', 'TI', 'GK', 'GI', 'MK', 'MI'];
+  const NAMA_JARI = { TK: 'telunjuk kanan', TI: 'telunjuk kiri', GK: 'tengah kanan', GI: 'tengah kiri', MK: 'manis kanan', MI: 'manis kiri' };
+  let urutan = null;
+
+  function susunUrutan() {
+    const kodeJari = (i) => i.slice(i.lastIndexOf('-') + 1);
+    const nama = (o) => o.replace(/^uji:/, '');
+    const identitas = [...new Set(galeri.map((j) => j.identitas))].sort((a, b) =>
+      orangDari(a).localeCompare(orangDari(b)) || URUTAN_JARI.indexOf(kodeJari(a)) - URUTAN_JARI.indexOf(kodeJari(b)));
+    const orang = [...new Set(identitas.map(orangDari))];
+    return [
+      ...identitas.map((i) => ({ harap: i, label: `${nama(orangDari(i))} ${NAMA_JARI[kodeJari(i)] ?? kodeJari(i)}` })),
+      ...orang.map((o) => ({ harap: 'ASING', label: `${nama(o)} jempol atau kelingking (jari tidak terdaftar)` })),
+    ];
+  }
+
+  async function mulaiUrutan() {
+    await muatGaleri();
+    if (!galeri.length) {
+      catat('Urutan tidak bisa dimulai: belum ada jari terdaftar.', 'peringatan');
+      return;
+    }
+    urutan = { butir: susunUrutan(), i: 0, ke: 0 };
+    laporan.urutan = { dimulai: new Date().toISOString(), butir: urutan.butir.length, selesai: null, dihentikan: null, dilewati: [] };
+    catat(`Urutan dimulai: ${urutan.butir.length} butir, masing-masing ${TEMPELAN_PER_BUTIR} tempelan.`, 'ok');
+    terapkanButir();
+  }
+
+  function terapkanButir() {
+    if (urutan.i >= urutan.butir.length) {
+      laporan.urutan.selesai = new Date().toISOString();
+      catat('Urutan selesai.', 'ok');
+      hentikanUrutan('Urutan selesai. Susun laporan di tab Laporan.');
+      return;
+    }
+    $('#harap').value = urutan.butir[urutan.i].harap;
+    tampilkanGiliran();
+  }
+
+  function tampilkanGiliran(pesan) {
+    $('#mulai-urutan').disabled = !!urutan;
+    $('#lewati-urutan').disabled = !urutan;
+    $('#henti-urutan').disabled = !urutan;
+    $('#harap').disabled = !!urutan;
+    const giliran = $('#giliran');
+    if (!urutan) {
+      giliran.textContent = pesan ?? 'Klik "Mulai urutan".';
+      giliran.className = 'giliran redup';
+      return;
+    }
+    const b = urutan.butir[urutan.i];
+    giliran.textContent = `Sekarang: ${b.label}, tempelan ${urutan.ke + 1} dari ${TEMPELAN_PER_BUTIR}`
+      + (urutan.ke >= TEMPELAN_PER_BUTIR ? ' (menyelesaikan percobaan)' : '') + ` · butir ${urutan.i + 1} dari ${urutan.butir.length}`;
+    giliran.className = 'giliran';
+  }
+
+  // Dipanggil setelah tempelan yang dijawab jembatan (bukan galat).
+  function majuUrutan() {
+    urutan.ke++;
+    const percobaanBerjalan = urutan.butir[urutan.i].harap !== 'ASING' && percobaanAktif !== null;
+    if (urutan.ke >= TEMPELAN_PER_BUTIR && !percobaanBerjalan) {
+      urutan.i++;
+      urutan.ke = 0;
+      terapkanButir();
+    } else {
+      tampilkanGiliran();
+    }
+  }
+
+  function lewatiButir() {
+    if (!urutan) return;
+    const b = urutan.butir[urutan.i];
+    laporan.urutan.dilewati.push({ label: b.label, harap: b.harap, tempelan: urutan.ke });
+    catat(`Dilewati: ${b.label} (${urutan.ke} tempelan).`, 'peringatan');
+    urutan.i++;
+    urutan.ke = 0;
+    terapkanButir();
+  }
+
+  function hentikanUrutan(pesan) {
+    urutan = null;
+    $('#harap').value = '';
+    tampilkanGiliran(pesan);
+  }
+
+  function hentiUrutanManual() {
+    if (!urutan) return;
+    laporan.urutan.dihentikan = new Date().toISOString();
+    catat(`Urutan dihentikan di butir ${urutan.i + 1} dari ${urutan.butir.length}.`, 'peringatan');
+    hentikanUrutan('Urutan dihentikan.');
+  }
 
   async function terimaIdentifikasi(s) {
     if (sibukIdentifikasi) {
@@ -764,19 +894,20 @@
     }
     sibukIdentifikasi = true;
     const harap = $('#harap').value || null;
+    const butir = urutan ? { butir: urutan.i + 1, label: urutan.butir[urutan.i].label, tempelan: urutan.ke + 1 } : null;
     const { kode, data } = await panggil('POST', '/identifikasi', { format: s.format, sampel: s.teks, tantangan: tantangan() });
     const ujungKeUjung = Math.round((performance.now() - s.t0) * 10) / 10;
     sibukIdentifikasi = false;
     sampelTerakhir = s;
-    tampilkanIdentifikasi(kode, data, harap, ujungKeUjung, s);
+    tampilkanIdentifikasi(kode, data, harap, ujungKeUjung, s, butir);
   }
 
-  function tampilkanIdentifikasi(kode, data, harap, ujungKeUjung, s) {
+  function tampilkanIdentifikasi(kode, data, harap, ujungKeUjung, s, butir) {
     const besar = $('#hasil-identifikasi');
     const rinci = $('#rincian-identifikasi');
     hitungan.tempelan++;
     const catatan = {
-      ke: hitungan.tempelan, waktu: new Date().toISOString(), asal: s.asal, format: s.format, harap, kode,
+      ke: hitungan.tempelan, waktu: new Date().toISOString(), asal: s.asal, format: s.format, harap, urutan: butir, kode,
       diterima: data?.diterima ?? null, identitas: data?.identitas ?? null, skor: data?.skor ?? null,
       kandidat: data?.kandidat ?? null, waktu_jembatan_ms: data?.waktu_ms ?? null, ujung_ke_ujung_ms: ujungKeUjung,
       pesan: kode === 200 ? null : data?.message ?? null,
@@ -801,6 +932,9 @@
         + `(ekstraksi ${data.waktu_ms.ekstraksi}, cocok ${data.waktu_ms.cocok}) · ujung ke ujung ${ujungKeUjung} ms · `
         + `${data.sampel.format} ${data.sampel.lebar}×${data.sampel.tinggi}, DPI galeri ${data.dpi}`;
       hitung(harap, data);
+      // Maju hanya kalau urutan masih di tempat yang sama dengan saat sampel
+      // dikirim; "Lewati" di tengah permintaan sudah memajukannya.
+      if (butir && urutan && urutan.i + 1 === butir.butir && urutan.ke + 1 === butir.tempelan) majuUrutan();
     }
     laporan.identifikasi.push(catatan);
     tampilkanHitungan();
@@ -813,6 +947,7 @@
     }
     if (!harap) {
       hitungan.tanpa_pilihan++;
+      catat('Tempelan tanpa pilihan "yang menempel" tidak dihitung. Klik "Mulai urutan".', 'peringatan');
       return;
     }
     if (harap === 'ASING') {
@@ -820,10 +955,14 @@
       return;
     }
     const benar = data.diterima && data.identitas === harap;
-    if (benar) hitungan.benar++; else if (data.diterima) hitungan.salah_orang++; else hitungan.tidak_dikenali++;
+    const orangSama = data.diterima && !benar && orangDari(data.identitas) === orangDari(harap);
+    if (benar) hitungan.benar++;
+    else if (orangSama) hitungan.jari_lain_orang_sama++;
+    else if (data.diterima) hitungan.salah_orang++;
+    else hitungan.tidak_dikenali++;
     percobaanAktif ??= { harap, ke: 0 };
     percobaanAktif.ke++;
-    if (benar) {
+    if (benar || orangSama) {
       percobaan['dikenali_ke_' + percobaanAktif.ke]++;
       percobaanAktif = null;
     } else if (data.diterima) {
@@ -837,18 +976,19 @@
 
   function tampilkanHitungan() {
     const persen = (a, b) => (b ? Math.round((a / b) * 1000) / 10 + '%' : '—');
-    const terdaftar = hitungan.benar + hitungan.salah_orang + hitungan.tidak_dikenali;
+    const terdaftar = hitungan.benar + hitungan.jari_lain_orang_sama + hitungan.salah_orang + hitungan.tidak_dikenali;
     const selesai = percobaan.dikenali_ke_1 + percobaan.dikenali_ke_2 + percobaan.dikenali_ke_3 + percobaan.gagal_3_kali + percobaan.salah_orang;
     const dalamTiga = percobaan.dikenali_ke_1 + percobaan.dikenali_ke_2 + percobaan.dikenali_ke_3;
     isiTabel($('#tabel-hitungan tbody'), [
       ['Tempelan', hitungan.tempelan],
-      ['Jari terdaftar: benar', `${hitungan.benar} dari ${terdaftar} (${persen(hitungan.benar, terdaftar)})`],
+      ['Jari terdaftar: jari tepat', `${hitungan.benar} dari ${terdaftar} (${persen(hitungan.benar, terdaftar)})`],
+      ['Jari terdaftar: orang benar, jari lain', hitungan.jari_lain_orang_sama],
       ['Jari terdaftar: SALAH ORANG', hitungan.salah_orang, hitungan.salah_orang ? 'galat' : ''],
       ['Jari terdaftar: tidak dikenali', hitungan.tidak_dikenali],
       ['Jari tidak terdaftar: ditolak', hitungan.asing_ditolak],
       ['Jari tidak terdaftar: DITERIMA', hitungan.asing_diterima, hitungan.asing_diterima ? 'galat' : ''],
-      ['Percobaan: dikenali pada tempelan pertama', `${percobaan.dikenali_ke_1} dari ${selesai} (${persen(percobaan.dikenali_ke_1, selesai)})`],
-      ['Percobaan: dikenali dalam tiga tempelan', `${dalamTiga} dari ${selesai} (${persen(dalamTiga, selesai)})`],
+      ['Percobaan: orang dikenali pada tempelan pertama', `${percobaan.dikenali_ke_1} dari ${selesai} (${persen(percobaan.dikenali_ke_1, selesai)})`],
+      ['Percobaan: orang dikenali dalam tiga tempelan', `${dalamTiga} dari ${selesai} (${persen(dalamTiga, selesai)})`],
       ['Percobaan: gagal tiga kali', percobaan.gagal_3_kali],
       ['Tanpa pilihan "yang menempel"', hitungan.tanpa_pilihan],
       ['Galat', hitungan.galat, hitungan.galat ? 'galat' : ''],
@@ -868,6 +1008,13 @@
 
   // ---------- Kalibrasi dan ukur ----------
 
+  // Uji 3 Oktober 2026 menerapkan 800 DPI, yang jaraknya −0,7, padahal 700
+  // jaraknya 42,2. Kini DPI dengan jarak terbesar dipilih otomatis, dan DPI
+  // yang jaraknya ≤ 0 tidak bisa diterapkan.
+  let jarakDpi = null;
+  let dpiTerbaik = null;
+  let dpiDipilih = false;
+
   async function hitungKalibrasi() {
     const tombol = $('#hitung-kalibrasi');
     tombol.disabled = true;
@@ -884,13 +1031,30 @@
       data.hasil.map((h) => [h.dpi, h.sama_jari.terendah, h.sama_jari.p5, h.sama_jari.median, h.sama_jari.di_bawah_40,
         h.sama_jari.di_bawah_50, h.sama_jari.di_bawah_60, h.beda_jari.tertinggi, h.beda_jari.p99, h.beda_jari.di_atas_40,
         h.beda_jari.di_atas_50, h.beda_jari.di_atas_60, h.jarak]));
-    catat(`Kalibrasi selesai: ${data.gambar} gambar dari ${data.identitas} identitas; DPI sekarang ${data.dpi_sekarang}.`, 'ok');
+    const terbaik = data.hasil.reduce((a, b) => (b.jarak > a.jarak ? b : a));
+    jarakDpi = new Map(data.hasil.map((h) => [h.dpi, h.jarak]));
+    dpiTerbaik = terbaik.dpi;
+    for (const o of $('#dpi-terapkan').options) {
+      const jarak = jarakDpi.get(Number(o.value));
+      o.textContent = jarak === undefined ? o.value : `${o.value} (jarak ${jarak}${Number(o.value) === dpiTerbaik ? ', terbaik' : ''})`;
+    }
+    $('#dpi-terapkan').value = String(dpiTerbaik);
+    dpiDipilih = true;
+    catat(`Kalibrasi selesai: ${data.gambar} gambar dari ${data.identitas} identitas; DPI sekarang ${data.dpi_sekarang}. `
+      + `DPI terbaik ${dpiTerbaik} (jarak ${terbaik.jarak}) sudah dipilih.`, 'ok');
   }
 
   async function terapkanDpi() {
     const dpi = Number($('#dpi-terapkan').value);
+    const jarak = jarakDpi?.get(dpi);
+    if (jarak !== undefined && jarak <= 0) {
+      catat(`DPI ${dpi} tidak diterapkan: jaraknya ${jarak}, jadi skor jari sama dan jari beda bertumpang tindih. `
+        + `DPI terbaik ${dpiTerbaik}.`, 'galat');
+      return;
+    }
+    if (dpiTerbaik !== null && dpi !== dpiTerbaik) catat(`DPI ${dpi} bukan yang terbaik menurut kalibrasi (${dpiTerbaik}).`, 'peringatan');
     const { kode, data } = await panggil('POST', '/kalibrasi', { terapkan: dpi });
-    laporan.penerapan_dpi.push({ waktu: new Date().toISOString(), dpi, kode, pesan: data?.message ?? null });
+    laporan.penerapan_dpi.push({ waktu: new Date().toISOString(), dpi, terbaik: dpiTerbaik, jarak: jarak ?? null, kode, pesan: data?.message ?? null });
     catat(kode === 200 ? `DPI galeri kini ${dpi}; ${data.templat} templat diekstrak ulang.` : 'Terapkan DPI: ' + (data?.message ?? kode),
       kode === 200 ? 'ok' : 'galat');
     await muatStatus();
@@ -960,7 +1124,7 @@
       adc: { terhubung: adc.terhubung, komunikasi_gagal: adc.komunikasi_gagal, pembaca: adc.pembaca, format_aktif: adc.format },
       tangkap: laporan.tangkap,
       daftar: laporan.daftar,
-      identifikasi: { hitungan, percobaan, tempelan: laporan.identifikasi },
+      identifikasi: { hitungan, percobaan, urutan: laporan.urutan, tempelan: laporan.identifikasi },
       sampel_kembar: laporan.sampel_kembar,
       kalibrasi: laporan.kalibrasi,
       penerapan_dpi: laporan.penerapan_dpi,
@@ -989,6 +1153,7 @@
     catat(kode === 200 ? data.message : 'Hapus data uji: ' + (data?.message ?? kode), kode === 200 ? 'ok' : 'galat');
     kosongkanSlot();
     sampelTerakhir = null;
+    if (urutan) hentikanUrutan('Urutan dihentikan karena data uji dihapus.');
     await muatStatus();
     await muatGaleri();
   }
@@ -1006,7 +1171,11 @@
   $('#jari').addEventListener('change', kosongkanSlot);
   $('#kosongkan-daftar').addEventListener('click', kosongkanSlot);
   $('#kirim-ulang').addEventListener('click', kirimUlang);
+  $('#mulai-urutan').addEventListener('click', mulaiUrutan);
+  $('#lewati-urutan').addEventListener('click', lewatiButir);
+  $('#henti-urutan').addEventListener('click', hentiUrutanManual);
   $('#hitung-kalibrasi').addEventListener('click', hitungKalibrasi);
+  $('#dpi-terapkan').addEventListener('change', () => { dpiDipilih = true; });
   konfirmasiDuaKali($('#terapkan-dpi'), terapkanDpi);
   $('#ukur').addEventListener('click', ukur);
   $('#detak-sekarang').addEventListener('click', detak);
@@ -1026,6 +1195,7 @@
   tampilkanAdc();
   tampilkanSlot();
   tampilkanHitungan();
+  tampilkanGiliran();
   await muatStatus();
   await muatGaleri();
   mulaiAdc();

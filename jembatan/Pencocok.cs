@@ -12,7 +12,7 @@
 // - SourceAFIS tidak tahan beda skala, jadi probe dan galeri harus diekstrak
 //   dengan DPI yang sama. DPI itu ditulis di kolom versi setiap rekaman,
 //   bersama versi pustaka, karena keduanya menentukan apakah dua templat bisa
-//   dibandingkan. Contoh: sourceafis-net-3.14.0-500.
+//   dibandingkan. Contoh: sourceafis-net-3.14.0-700.
 // - Identifikasi diterima kalau skor terbaik mencapai Ambang DAN cukup jauh di
 //   atas identitas kedua. Ambang 40 yang dianjurkan untuk 1:1 terlalu longgar
 //   untuk ratusan templat: setiap perbandingan membawa peluang salah-cocok.
@@ -48,7 +48,12 @@ sealed class Pencocok
     const double AmbangSatuLawanSatu = 40;
 
     public const int JumlahTempelan = 4;
-    const int DpiBawaan = 500;
+    // DPI galeri baru, dan galeri setelah data uji dihapus. 700 adalah DPI yang
+    // dilaporkan U.are.U 4500 lewat WebSDK, dan kalibrasi uji 3 Oktober 2026
+    // (17 jari, 102 pasangan sama-jari, 2.176 beda-jari) memisahkan jari sama
+    // dan jari beda paling lebar di 700: jarak 42,2, sedangkan di 500 hanya
+    // 19,5. Galeri yang sudah berisi tetap memakai DPI rekamannya.
+    const int DpiBawaan = 700;
     static readonly int[] DpiKalibrasi = [500, 512, 600, 700, 800];
     static readonly int[] UkuranGaleriUkur = [50, 100, 500, 2000];
 
@@ -674,10 +679,11 @@ sealed class Sampel
     // menyebut kolom yang ditemukan, tanpa isi sampelnya.
     //
     // Pikselnya boleh diikuti beberapa byte yang bukan gambar: U.are.U 4500
-    // mengirim 500 × 550 piksel ditambah 12 byte di akhir (terukur di PC
-    // kiosk, 1 Oktober 2026; isinya tidak diketahui). Yang dipakai hanya
-    // lebar × tinggi byte pertama, juga untuk Sidik, supaya sampel yang sama
-    // dengan ekor berbeda tetap dikenali kembar.
+    // mengirim 500 × 550 piksel ditambah 12 byte di akhir (terukur dengan
+    // pembaca sekolah, 1 Oktober 2026; pada uji 3 Oktober kedua belas byte
+    // itu selalu nol). Yang dipakai hanya lebar × tinggi byte pertama, juga
+    // untuk Sidik, supaya sampel yang sama dengan ekor berbeda tetap dikenali
+    // kembar.
     static Sampel BacaRaw(string teks, bool bungkus)
     {
         using var dokumen = JsonDocument.Parse(BacaBase64(teks));
