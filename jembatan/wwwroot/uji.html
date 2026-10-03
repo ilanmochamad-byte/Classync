@@ -14,7 +14,7 @@
   diubah, hash-nya harus dihitung ulang (lihat README.md), atau peramban
   menolak menjalankannya.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-g06f8ZiJLr8jkuMdmOQSc+HP0I5fyu9qhsY5ikg0Dho=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-4gH57zdNHz0931d+FUhdXducUIDqxuNeVNSj92IMDqU=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
 <title>Uji jembatan sidik jari</title>
 <style>
   :root { --biru: #1d4ed8; --hijau: #15803d; --merah: #b91c1c; --kuning: #a16207; --abu: #6b7280; --garis: #d1d5db; }
@@ -100,7 +100,7 @@
 
   <section class="kartu" data-tab="tangkap">
     <h2>Tangkap: periksa format sampel</h2>
-    <p class="redup">Tempelkan jari beberapa kali dengan format Raw, lalu dengan PNG. Untuk laporan hanya ukuran dan metadatanya yang dicatat, bukan gambarnya.</p>
+    <p class="redup">Tempelkan jari beberapa kali dengan format Raw, lalu dengan PNG. Untuk laporan hanya ukuran dan metadatanya yang dicatat, bukan gambarnya. Kalau alat menambahkan byte setelah gambar (ekor), byte itu ikut dicatat.</p>
     <div id="gambar-tangkap"></div>
     <table id="tabel-tangkap"><tbody></tbody></table>
     <p id="jumlah-tangkap" class="redup"></p>
@@ -194,7 +194,7 @@
 <script>
 'use strict';
 (async () => {
-  const VERSI_HALAMAN = '0.1.0';
+  const VERSI_HALAMAN = '0.1.1';
   const $ = (pemilih) => document.querySelector(pemilih);
 
   // ---------- Catatan untuk laporan dan log di layar ----------
@@ -328,6 +328,8 @@
       // Pengait untuk uji otomatis di Mac. Tidak ada di luar mode pengembangan.
       window.ujiPengembangan = {
         dariUrl: async (url) => sampelDariBerkas(await (await fetch(url)).blob(), url),
+        // Kejadian berbentuk sama dengan SamplesAcquired dari WebSDK, lewat jalur yang sama dengan alat.
+        dariAlat: (kejadian) => terimaSampelAlat(kejadian),
         bukaTab,
         pilih: (pemilih, nilai) => { $(pemilih).value = nilai; $(pemilih).dispatchEvent(new Event('change')); },
       };
@@ -468,6 +470,8 @@
 
   const bytesKeB64url = (bytes) => bytesKeB64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+  const heks = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(' ');
+
   function kanvasDariPiksel(piksel, lebar, tinggi) {
     const kanvas = document.createElement('canvas');
     kanvas.width = lebar;
@@ -486,17 +490,30 @@
   // dari JSON {Data: piksel base64url, Format: {iWidth, iHeight, iXdpi, ...}}.
   // Yang dikirim ke jembatan adalah Data itu apa adanya; jembatan membacanya
   // sendiri. Halaman hanya membukanya untuk ditampilkan dan dicatat.
+  //
+  // Pikselnya boleh diikuti ekor: byte yang bukan gambar, misalnya 12 byte
+  // dari U.are.U 4500. Aturannya sama dengan jembatan: kelebihan diterima
+  // kalau kurang dari sisi terpendek. Ekor dicatat dalam heksadesimal supaya
+  // terlihat apakah isinya tetap: paling banyak 64 byte, dan hanya kalau
+  // panjangnya diterima. Kalau tidak diterima, byte setelah lebar × tinggi
+  // bisa saja piksel gambar, jadi tidak dicatat.
   function sampelRaw(bio) {
     const dalam = JSON.parse(new TextDecoder().decode(b64urlKeBytes(bio.Data)));
     const format = dalam.Format ?? {};
     const piksel = b64urlKeBytes(dalam.Data);
+    const luas = format.iWidth * format.iHeight;
+    const lebih = piksel.length - luas;
+    const diterima = lebih >= 0 && lebih < Math.min(format.iWidth, format.iHeight);
     return {
       format: 'raw',
       teks: bio.Data,
       lebar: format.iWidth ?? null,
       tinggi: format.iHeight ?? null,
       dpi: format.iXdpi ?? null,
-      panjang_cocok: piksel.length === format.iWidth * format.iHeight,
+      panjang_piksel: piksel.length,
+      byte_lebih: Number.isFinite(lebih) ? lebih : null,
+      panjang_diterima: diterima,
+      ekor_hex: diterima && lebih > 0 ? heks(piksel.subarray(luas, luas + 64)) + (lebih > 64 ? ' …' : '') : null,
       kolom_format: format,
       header: bio.Header ?? null,
       gambar: () => kanvasDariPiksel(piksel, format.iWidth, format.iHeight),
@@ -513,7 +530,10 @@
       lebar: null,
       tinggi: null,
       dpi: null,
-      panjang_cocok: null,
+      panjang_piksel: null,
+      byte_lebih: null,
+      panjang_diterima: null,
+      ekor_hex: null,
       kolom_format: null,
       header: null,
       gambar: () => {
@@ -596,10 +616,17 @@
 
   // ---------- Tangkap ----------
 
+  function teksPanjang(c) {
+    if (c.panjang_piksel === null) return null;
+    if (!c.panjang_diterima) return `${c.panjang_piksel}: TIDAK cocok dengan lebar × tinggi`;
+    return `${c.panjang_piksel} = lebar × tinggi` + (c.byte_lebih > 0 ? ` + ${c.byte_lebih} byte ekor` : '');
+  }
+
   function terimaTangkap(s) {
     const catatan = {
       waktu: new Date().toISOString(), asal: s.asal, format: s.format,
-      lebar: s.lebar, tinggi: s.tinggi, dpi: s.dpi, panjang_cocok: s.panjang_cocok,
+      lebar: s.lebar, tinggi: s.tinggi, dpi: s.dpi,
+      panjang_piksel: s.panjang_piksel, byte_lebih: s.byte_lebih, panjang_diterima: s.panjang_diterima, ekor_hex: s.ekor_hex,
       kolom_format: s.kolom_format, header: s.header, kualitas: s.kualitas, panjang_teks: s.teks.length,
     };
     laporan.tangkap.push(catatan);
@@ -610,8 +637,8 @@
         ['Format', catatan.format],
         ['Ukuran', `${catatan.lebar ?? '?'} × ${catatan.tinggi ?? '?'}`],
         ['DPI dari alat', catatan.dpi],
-        ['Panjang piksel = lebar × tinggi', catatan.panjang_cocok === null ? null : catatan.panjang_cocok ? 'ya' : 'TIDAK',
-          catatan.panjang_cocok === false ? 'galat' : ''],
+        ['Panjang piksel', teksPanjang(catatan), catatan.panjang_diterima === false ? 'galat' : ''],
+        ['Byte ekor (heksadesimal)', catatan.ekor_hex],
         ['Kolom Format', catatan.kolom_format ? JSON.stringify(catatan.kolom_format) : null],
         ['Header BioSample', catatan.header ? JSON.stringify(catatan.header) : null],
         ['Kualitas', catatan.kualitas],

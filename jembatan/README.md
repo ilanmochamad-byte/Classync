@@ -70,6 +70,10 @@ paket dibuat:
 Get-FileHash .\jembatan-sidik-jari.exe -Algorithm SHA256
 ```
 
+Panel Jembatan di halaman uji menampilkan versi `.exe` yang sedang jalan,
+berbentuk `0.1.1+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
+setelah semua perubahan di-commit, supaya commit itu memang isi paketnya.
+
 ## Uji di PC kiosk
 
 Kerjakan di luar jam kiosk (hari Minggu, atau setelah siswa pulang), karena
@@ -126,13 +130,23 @@ konsol.
 
 1. **Tangkap.** Lima tempelan dengan format Raw, lalu lima dengan PNG (pilih di
    panel Authentication Device Client). Periksa ukuran, DPI dari alat, dan
-   "Panjang piksel = lebar × tinggi".
+   baris "Panjang piksel". Yang diharapkan dari U.are.U 4500, terukur di PC
+   kiosk pada 1 Oktober 2026:
+
+   - Raw: ukuran 500 × 550, DPI dari alat 700, dan "Panjang piksel" berbunyi
+     `275012 = lebar × tinggi + 12 byte ekor`. Isi baris "Byte ekor
+     (heksadesimal)" ikut tercatat di laporan.
+   - PNG: ukuran 500 × 550. Baris DPI, panjang piksel, dan byte ekor kosong.
+
+   Kalau "Panjang piksel" merah dengan tulisan TIDAK, jembatan akan menolak
+   sampel Raw itu. Berhenti di sini dan kirim tangkapan layarnya.
 2. **Daftar.** Setiap relawan mendaftarkan 6 jari (telunjuk, tengah, manis;
    kanan dan kiri), 4 tempelan per jari. Coba daftarkan ulang jari R1 telunjuk
    kanan dengan kode lain: harus ditolak sebagai jari ganda.
 3. **Kalibrasi & ukur.** "Hitung kalibrasi", pilih DPI dengan "Jarak" terbesar,
    lalu "Terapkan DPI" (klik dua kali). Kerjakan sebelum jembatan dimulai
-   ulang: gambar pendaftaran hanya ada di memori.
+   ulang: gambar pendaftaran hanya ada di memori. Jangan dilewati: galeri
+   mulai dari 500 DPI, sedangkan alat ini melaporkan 700.
 4. **Identifikasi.** Sebelum setiap tempelan, pilih "Yang menempel sekarang".
    Tempel setiap jari terdaftar 5 kali. Tempel jempol dan kelingking 5 kali
    per orang dengan pilihan "Jari tidak terdaftar".
@@ -250,6 +264,23 @@ ditolak sebelum diproses, permintaan tanpa Origin hanya boleh GET, POST wajib
 "Kiosk" berarti `https://smkt.alhasan.co.id`. Tidak ada rute yang
 mengembalikan templat atau gambar, dan tidak ada rute yang menandatangani isi
 kiriman pemanggil. Jembatan tidak pernah menghubungi server sendiri.
+
+### Sampel
+
+Halaman meneruskan sampel dari WebSDK apa adanya; jembatan yang membacanya.
+
+- **Raw:** `Data` sebuah BioSample, yaitu base64url dari JSON
+  `{Data, Format}`. `Data` di dalamnya adalah piksel 8-bit baris demi baris
+  (base64url), dan `Format` memuat `iWidth`, `iHeight`, dan `iXdpi`. Struktur
+  ini tidak didokumentasikan HID; yang tertulis di sini hasil pengukuran.
+- **Ekor:** pikselnya boleh diikuti byte yang bukan gambar. U.are.U 4500
+  mengirim 500 × 550 piksel ditambah 12 byte di akhir (275.012 byte); isinya
+  belum diketahui. Jembatan menerima kelebihan yang kurang dari sisi
+  terpendek gambar, dan hanya memakai lebar × tinggi byte pertama, juga
+  untuk penjaga sampel kembar. Data yang kurang, atau yang lebihnya sepanjang
+  sisi terpendek atau lebih, ditolak: itu tanda `Format` tidak menggambarkan
+  datanya.
+- **PNG:** base64url berkas PNG. Hanya untuk prototipe.
 
 ### Data
 

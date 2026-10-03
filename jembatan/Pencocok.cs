@@ -672,6 +672,12 @@ sealed class Sampel
     // {Data: piksel base64url, Format: {iWidth, iHeight, iXdpi, ...}}.
     // Struktur ini tidak didokumentasikan HID. Kalau berbeda, pesan galatnya
     // menyebut kolom yang ditemukan, tanpa isi sampelnya.
+    //
+    // Pikselnya boleh diikuti beberapa byte yang bukan gambar: U.are.U 4500
+    // mengirim 500 × 550 piksel ditambah 12 byte di akhir (terukur di PC
+    // kiosk, 1 Oktober 2026; isinya tidak diketahui). Yang dipakai hanya
+    // lebar × tinggi byte pertama, juga untuk Sidik, supaya sampel yang sama
+    // dengan ekor berbeda tetap dikenali kembar.
     static Sampel BacaRaw(string teks, bool bungkus)
     {
         using var dokumen = JsonDocument.Parse(BacaBase64(teks));
@@ -705,18 +711,25 @@ sealed class Sampel
         {
             throw new SampelTidakSahException("Ukuran gambar raw tidak sah. Format: " + ringkasFormat);
         }
-        if (piksel.Length != lebar * tinggi)
+        // Kelebihannya harus lebih kecil dari sisi terpendek. Lebar atau tinggi
+        // yang meleset satu saja mengubah panjangnya sebesar sisi yang lain,
+        // jadi Format yang tidak menggambarkan datanya tetap ditolak, bukan
+        // dibaca sebagai gambar yang miring.
+        var luas = lebar.Value * tinggi.Value;
+        var lebih = piksel.Length - luas;
+        if (lebih < 0 || lebih >= Math.Min(lebar.Value, tinggi.Value))
         {
-            throw new SampelTidakSahException($"Panjang piksel {piksel.Length} tidak sama dengan {lebar} × {tinggi}. Format: {ringkasFormat}");
+            throw new SampelTidakSahException($"Panjang piksel {piksel.Length} tidak cocok dengan {lebar} × {tinggi}. Format: {ringkasFormat}");
         }
+        var gambar = lebih == 0 ? piksel : piksel[..luas];
         return new Sampel
         {
             Format = "raw",
             Lebar = lebar.Value,
             Tinggi = tinggi.Value,
             DpiAlat = dpi is >= 100 and <= 2000 ? dpi : null,
-            Isi = piksel,
-            Sidik = Convert.ToHexStringLower(SHA256.HashData(piksel)),
+            Isi = gambar,
+            Sidik = Convert.ToHexStringLower(SHA256.HashData(gambar)),
         };
     }
 
