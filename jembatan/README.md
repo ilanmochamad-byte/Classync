@@ -55,7 +55,10 @@ DOTNET_CLI_TELEMETRY_OPTOUT=1 ~/.dotnet/dotnet run -- --pengembangan --data /tmp
 ```
 
 Lalu buka `http://127.0.0.1:47890/`. Dalam mode pengembangan, halaman uji
-menampilkan pemilih berkas PNG sebagai pengganti alat. Di luar Windows,
+menampilkan pemilih berkas PNG sebagai pengganti alat. Halaman juga
+menyediakan `window.ujiPengembangan` untuk uji otomatis: `pasangAdc()` di
+dalamnya memasang ADC tiruan, supaya mulai, berhenti, dan pergantian format
+penangkapan bisa diuji tanpa Authentication Device Client. Di luar Windows,
 jembatan menolak berjalan tanpa `--pengembangan`, dan layanan Windows
 menolak `--pengembangan`.
 
@@ -71,7 +74,7 @@ Get-FileHash .\jembatan-sidik-jari.exe -Algorithm SHA256
 ```
 
 Panel Jembatan di halaman uji menampilkan versi `.exe` yang sedang jalan,
-berbentuk `0.1.3+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
+berbentuk `0.1.4+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
 setelah semua perubahan di-commit, supaya commit itu memang isi paketnya.
 
 ## Uji di PC kiosk
@@ -89,13 +92,20 @@ menentukan ukuran dan DPI gambar adalah driver, bukan pembacanya:
 | Dipakai di | komputer lain (uji 1 dan 3 Oktober 2026) | PC kiosk (uji 3 Oktober 2026) |
 | Sampel Raw | 500 × 550, 700 DPI, 12 byte ekor bernilai nol | 320 × 360, 508 DPI, tanpa ekor |
 | Pembaca menurut ADC | Optical, UID tetap | Unknown, UID berganti tiap alat dicolok |
-| Penangkapan | terus-menerus | berhenti setelah tiap tempelan; halaman memulainya lagi |
-| Kalibrasi 3 Oktober | 700 terbaik (jarak 42,2) | 500 terbaik (jarak 109,7); 700 hanya 8,2 |
+| Kalibrasi 3 Oktober | 700 terbaik (jarak 42,2) | 508 jaraknya 129, setara dengan yang terbaik (512: 136,8); 700 jaraknya −8,9 |
 
 PC kiosk memakai driver WBF yang dipasang Windows sendiri, dan pembacanya
 langsung tampil di ADC. Uji di komputer lain cukup untuk mencoba alur halaman,
 tetapi kriteria lanjut ke 4.2 dinilai di PC kiosk. Mengganti driver mengubah
 ukuran dan DPI gambar, jadi semua jari harus didaftarkan ulang.
+
+Di PC kiosk penangkapan sesekali berhenti sendiri, lalu halaman memulainya
+lagi. Pada uji 3 Oktober itu terjadi di sela tangkapan layar, bukan karena
+tempelan: 59 tempelan berturut-turut lewat tanpa satu pun mulai ulang. Dugaan
+terkuatnya jendela Chrome yang tidak aktif, karena WebSDK hanya melayani
+jendela yang sedang aktif. Sejak 0.1.4 laporan mencatat setiap mulai ulang
+beserta keadaan jendelanya, supaya dugaan itu bisa dipastikan. Dengan driver
+DigitalPersona hal ini belum diamati.
 
 ### Fase A: driver, ADC, dan jembatan di jendela konsol
 
@@ -118,8 +128,9 @@ ukuran dan DPI gambar, jadi semua jari harus didaftarkan ulang.
 
    Jendela ini menampilkan log jembatan; menutupnya menghentikan jembatan.
    Buka `http://127.0.0.1:47890/` di Chrome, lalu klik halamannya: WebSDK
-   hanya mengirim sampel ke jendela yang sedang aktif. Kalau panel
-   Authentication Device Client menampilkan pembaca, lanjut ke fase B dengan
+   hanya mengirim sampel ke jendela yang sedang aktif. Baris Penangkapan di
+   panel Authentication Device Client mengingatkan kalau jendelanya sedang
+   tidak aktif. Kalau panel itu menampilkan pembaca, lanjut ke fase B dengan
    driver yang ada. Di PC kiosk itu driver WBF bawaan Windows.
 5. Kalau pembaca tidak muncul dengan driver WBF: di Device Manager, Uninstall
    device dengan centang "Delete the driver software for this device", cabut
@@ -146,7 +157,9 @@ harus biner acak, bukan JSON yang terbaca. Itu tanda DPAPI bekerja.
 
 Semuanya di halaman `http://127.0.0.1:47890/`, dengan jembatan di jendela
 konsol. Jangan tutup jendela itu sebelum fase C langkah 1: jembatan ikut
-berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
+berhenti, dan gambar pendaftaran yang hanya ada di memori hilang. Setelah
+mengambil tangkapan layar atau berpindah jendela, klik halaman dulu sebelum
+menempelkan jari.
 
 1. **Tangkap.** Lima tempelan dengan format Raw, lalu lima dengan PNG (pilih di
    panel Authentication Device Client). Periksa ukuran, DPI dari alat, dan
@@ -166,7 +179,9 @@ berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
    "Hapus semua data uji" di tab Laporan (klik dua kali). Pendaftaran pertama
    di galeri kosong menetapkan DPI galeri dari DPI alat, dan hasil pendaftaran
    menyebut "DPI galeri …": angkanya harus sama dengan "DPI dari alat" di tab
-   Tangkap. Format pindah sendiri ke Raw saat tab Daftar dibuka. Setiap
+   Tangkap. Format pindah sendiri ke Raw saat tab Daftar dibuka. Kalau sampel
+   tetap datang sebagai PNG, halaman memulai ulang penangkapannya sendiri;
+   kalau catatan kejadian meminta, tekan F5 (laporan tidak hilang). Setiap
    relawan mendaftarkan 6 jari (telunjuk, tengah, manis; kanan dan kiri), 4
    tempelan per jari. Periksa pilihan Jari sebelum menempel: tabel galeri
    harus memuat 6 jari per relawan. Coba daftarkan ulang jari R1 telunjuk
@@ -191,15 +206,19 @@ berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
 5. **Identifikasi, satu jari 8 kali.** Setelah urutan selesai, pilih satu jari
    terdaftar di "Yang menempel sekarang", lalu tempelkan jari itu 8 kali
    berturut-turut. Perhatikan gambar di bawah hasil dan angka "mirip tempelan
-   sebelumnya". Pada uji 3 Oktober di PC kiosk, tempelan kelima dan seterusnya
-   pada jari yang sama selalu gagal, dan sebabnya belum diketahui. Rekaman
-   langkah inilah yang akan menunjukkannya.
+   sebelumnya". Pada uji 3 Oktober di PC kiosk dengan galeri yang masih
+   700 DPI, tempelan kelima dan seterusnya pada jari yang sama selalu gagal,
+   dan sebabnya belum diketahui. Dengan galeri 508 DPI langkah ini belum
+   pernah dijalankan; rekamannya yang akan menunjukkan apakah gejala itu
+   masih ada.
 6. **Kalibrasi & ukur.** "Ukur waktu 1:N", sebaiknya setelah beberapa
    identifikasi. Angkanya hanya berlaku untuk komputer tempat uji berjalan.
 7. **Identifikasi.** "Kirim ulang sampel terakhir": harus ditolak (409).
 8. **Detak.** "Detak sekarang". Cabut alat, detak lagi: status alat harus
-   berubah. Colok kembali. Nyalakan "Otomatis tiap 60 detik" selama 30 menit,
-   dengan halaman dan jendela konsol tetap terbuka.
+   berubah. Colok kembali, lalu tempelkan satu jari di tab Tangkap: sampelnya
+   harus tetap datang, dan catatan kejadian memuat "pembaca baru terhubung".
+   Nyalakan "Otomatis tiap 60 detik" selama 30 menit, dengan halaman dan
+   jendela konsol tetap terbuka.
 
 ### Fase C: layanan dan akun standar
 
@@ -253,9 +272,10 @@ berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
 ### Fase D: laporan dan bersih-bersih
 
 1. Di halaman uji, tab Laporan: "Susun laporan", "Salin", lalu kirim ke
-   Claude. Isinya hanya angka dan metadata: tanpa gambar, templat, kunci, atau
-   nama. Catatannya disimpan di peramban, jadi tetap utuh walau halaman dimuat
-   ulang atau jembatan berpindah dari konsol ke layanan.
+   Claude. Isinya angka, metadata, dan 300 baris terakhir catatan kejadian:
+   tanpa gambar, templat, kunci, atau nama. Catatannya disimpan di peramban,
+   jadi tetap utuh walau halaman dimuat ulang atau jembatan berpindah dari
+   konsol ke layanan.
 2. "Hapus semua data uji" (klik dua kali), lalu "Kosongkan laporan" (klik dua
    kali).
 3. Dari PowerShell admin di folder paket:
@@ -277,13 +297,19 @@ berhenti, dan gambar pendaftaran yang hanya ada di memori hilang.
 - Orang dikenali pada tempelan pertama ≥ 90%, dan dalam tiga tempelan ≥ 99%.
 - Ujung ke ujung di PC kiosk ≤ 1 detik pada galeri 500 templat.
 
-Keadaan per 3 Oktober 2026, dari uji di PC kiosk dengan driver WBF:
+Keadaan per 3 Oktober 2026, dari dua uji di PC kiosk dengan driver WBF: paket
+0.1.2 dengan galeri 700 DPI, lalu paket 0.1.3 dengan galeri 508 DPI.
 
-- Waktu terpenuhi: galeri 500 templat butuh median 80 ms (p95 90 ms) dan
-  ekstraksi 21 ms, di Windows 10 build 19045 dengan 4 prosesor.
-- Salah orang 0 dan jari tidak terdaftar yang diterima 0, pada 96 tempelan.
-- Tingkat pengenalan belum bisa dinilai. Galeri uji itu masih memakai 700 DPI,
-  dan tempelan kelima dan seterusnya pada jari yang sama selalu gagal.
+- Waktu terpenuhi: pada 508 DPI, galeri 500 templat butuh median 34 ms (p95
+  54 ms) dan ekstraksi 38 ms, di Windows 10 build 19045 dengan 4 prosesor.
+- Salah orang 0 dan jari tidak terdaftar yang diterima 0, pada 131 tempelan
+  dari kedua uji. Dua puluh di antaranya jari tidak terdaftar, dan semuanya
+  ditolak.
+- Tingkat pengenalan baru terukur untuk satu relawan. Pada 508 DPI, R1
+  dikenali pada tempelan pertama di 30 dari 30 percobaan, dengan skor 93–326
+  dan kandidat kedua tertinggi 27. R2 dan R3 belum diuji pada 508 DPI.
+- Belum dijalankan: langkah "satu jari 8 kali", detak otomatis 30 menit, dan
+  sisa fase C.
 
 ## Titik mundur
 
@@ -394,10 +420,11 @@ tempelan dan untuk mencari jari ganda. Angka 50 dan 10 adalah nilai awal
 prototipe; angka akhirnya dipilih dari laporan uji di PC kiosk.
 
 Kalibrasi 3 Oktober memberi jarak yang lebar di kedua driver. Di PC kiosk pada
-500 DPI, skor sama-jari terendah 126,7 dan beda-jari tertinggi 17. Dengan
+508 DPI, skor sama-jari terendah 151,6 dan beda-jari tertinggi 22,6. Dengan
 driver DigitalPersona pada 700 DPI, angkanya 74,5 dan 32,3. Ambang jangan
-diturunkan ke 40: pada uji identifikasi di PC kiosk, telunjuk kiri pernah
-mendapat skor 41,3 terhadap telunjuk kanan orang yang sama.
+diturunkan ke 40: pada uji identifikasi di PC kiosk dengan galeri 700 DPI,
+telunjuk kiri pernah mendapat skor 41,3 terhadap telunjuk kanan orang yang
+sama.
 
 ## Mengubah halaman uji
 
@@ -434,7 +461,8 @@ Harus dicabut atau diubah sebelum dipakai untuk siswa (4.2 sampai 4.4):
 - Probe identifikasi terakhir yang disimpan di memori untuk `/ukur`, dan
   `skor_probe_sebelumnya` di jawaban `/identifikasi`: kemiripan dengan
   tempelan sebelumnya, hanya untuk menyelidiki tempelan yang gagal.
-- Catatan laporan yang disimpan halaman uji di `localStorage` peramban.
+- Catatan laporan yang disimpan halaman uji di `localStorage` peramban,
+  termasuk catatan kejadian dan riwayat mulai ulang penangkapan.
 - Format PNG; di produksi hanya Raw.
 - Ambang 50 dan selisih 10, diganti angka dari laporan uji.
 - Identifikasi dari halaman kiosk, yang baru dibuka di 4.4.
