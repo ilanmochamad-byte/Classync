@@ -14,7 +14,7 @@
   diubah, hash-nya harus dihitung ulang (lihat README.md), atau peramban
   menolak menjalankannya.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-PoBQctumOm5OUCqclWAHBJdHqQUC71Le/xS24A6L2y8=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5/TPpR+b1UfpnwLBH6fh23Wm8jtfhz4AxhtwxygwI/k=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
 <title>Uji jembatan sidik jari</title>
 <style>
   :root { --biru: #1d4ed8; --hijau: #15803d; --merah: #b91c1c; --kuning: #a16207; --abu: #6b7280; --garis: #d1d5db; }
@@ -186,7 +186,7 @@
 
   <section class="kartu" data-tab="laporan" hidden>
     <h2>Laporan</h2>
-    <p class="redup">Isinya hanya angka dan metadata: tanpa gambar, templat, kunci, atau nama. Catatannya disimpan di peramban ini, jadi tidak hilang saat halaman dimuat ulang atau jembatan dimulai ulang. Susun, salin, lalu kirim ke Claude; sesudah itu kosongkan.</p>
+    <p class="redup">Isinya angka, metadata, dan 300 baris terakhir catatan kejadian: tanpa gambar, templat, kunci, atau nama. Catatannya disimpan di peramban ini, jadi tidak hilang saat halaman dimuat ulang atau jembatan dimulai ulang. Susun, salin, lalu kirim ke Claude; sesudah itu kosongkan.</p>
     <div class="baris">
       <button id="susun-laporan">Susun laporan</button>
       <button id="salin-laporan">Salin</button>
@@ -206,7 +206,7 @@
 <script>
 'use strict';
 (async () => {
-  const VERSI_HALAMAN = '0.1.3';
+  const VERSI_HALAMAN = '0.1.4';
   const $ = (pemilih) => document.querySelector(pemilih);
 
   // ---------- Catatan untuk laporan dan log di layar ----------
@@ -216,16 +216,30 @@
     kalibrasi: null, penerapan_dpi: [], ukur: null, urutan: null, urutan_sebelumnya: [],
     detak: { ok: 0, gagal: 0, alat_1: 0, alat_0: 0, terakhir: null },
     csp_dilanggar: [], galat: [], sesi: [],
+    mulai_ulang: [], format_meleset: [], catatan: [],
   };
 
+  // Daftar yang hanya menyimpan butir terakhir, supaya simpanan tidak membengkak.
+  function batasi(daftar, maks) {
+    if (daftar.length > maks) daftar.splice(0, daftar.length - maks);
+  }
+
+  // Catatan kejadian ikut masuk laporan, semua jenisnya. Uji 3 Oktober 2026 di
+  // PC kiosk menyisakan urutan kejadian yang tidak bisa disusun ulang, karena
+  // laporan hanya menyimpan baris galat.
+  const BARIS_CATATAN = 300;
+
   function catat(teks, jenis) {
+    const kini = new Date();
     const baris = document.createElement('div');
-    baris.textContent = new Date().toLocaleTimeString('id-ID', { hour12: false }) + '  ' + teks;
+    baris.textContent = kini.toLocaleTimeString('id-ID', { hour12: false }) + '  ' + teks;
     if (jenis) baris.className = jenis;
     const wadah = $('#log');
     wadah.prepend(baris);
     while (wadah.childNodes.length > 500) wadah.lastChild.remove();
-    if (jenis === 'galat') laporan.galat.push({ waktu: new Date().toISOString(), pesan: teks });
+    if (jenis === 'galat') laporan.galat.push({ waktu: kini.toISOString(), pesan: teks });
+    laporan.catatan.push(`${kini.toISOString()} ${jenis || 'biasa'} ${teks}`);
+    batasi(laporan.catatan, BARIS_CATATAN);
   }
 
   window.addEventListener('error', (e) => catat('Galat skrip: ' + e.message, 'galat'));
@@ -398,6 +412,9 @@
         dariUrl: async (url) => sampelDariBerkas(await (await fetch(url)).blob(), url),
         // Kejadian berbentuk sama dengan SamplesAcquired dari WebSDK, lewat jalur yang sama dengan alat.
         dariAlat: (kejadian) => terimaSampelAlat(kejadian),
+        // ADC tiruan: objek berbentuk Fingerprint.WebApi, supaya mulai, berhenti,
+        // dan pergantian format bisa diuji tanpa Authentication Device Client.
+        pasangAdc: (tiruan) => pasangApi(tiruan),
         bukaTab,
         pilih: (pemilih, nilai) => { $(pemilih).value = nilai; $(pemilih).dispatchEvent(new Event('change')); },
       };
@@ -427,22 +444,57 @@
 
   const adc = { terhubung: null, komunikasi_gagal: 0, pembaca: [], menangkap: false, format: 'raw', kualitas: null, mulai_ulang: 0 };
   let api = null;
-  // Lewat driver WBF, penangkapan berhenti setelah SETIAP tempelan, lalu muncul
-  // kejadian "pembaca terhubung" ber-UID nol, dan halaman memulainya lagi.
-  // Supaya catatan kejadian tidak tenggelam, mulai dan berhenti hanya dicatat
-  // kalau diminta pengguna; yang otomatis cukup dihitung.
+  // Di PC kiosk (driver WBF) penangkapan sesekali berhenti sendiri, lalu ADC
+  // mengirim kejadian "pembaca terhubung" ber-UID nol dan halaman memulainya
+  // lagi. Pada uji 3 Oktober 2026 itu terjadi di sela tangkapan layar, bukan
+  // karena tempelan: 59 tempelan berturut-turut lewat tanpa satu pun mulai
+  // ulang. Dugaan terkuatnya jendela peramban yang tidak aktif, karena WebSDK
+  // hanya melayani jendela yang sedang aktif.
+  //
+  // Mulai dan berhenti hanya dicatat kalau diminta pengguna atau dipaksa
+  // halaman. Mulai ulang otomatis mendapat satu baris dan satu butir laporan,
+  // beserta keadaan jendela saat penangkapan berhenti, supaya dugaan itu bisa
+  // dipastikan dari laporan.
   let catatTangkap = true;
+  let pernahMulai = false;
+  let berhentiTerakhir = null;
+  let fokusKembali = null;
+  let sampelSejakMulai = 0;
+  const PENANGAN_ADC = ['onCommunicationFailed', 'onDeviceConnected', 'onDeviceDisconnected', 'onAcquisitionStarted',
+    'onAcquisitionStopped', 'onQualityReported', 'onErrorOccurred', 'onSamplesAcquired'];
 
   function tampilkanAdc() {
+    const jendelaAktif = document.hasFocus();
     isiTabel($('#tabel-adc tbody'), [
       ['Koneksi', adc.terhubung === null ? 'Menghubungkan…' : adc.terhubung ? 'Terhubung' : 'Tidak terhubung',
         adc.terhubung ? 'ok' : adc.terhubung === false ? 'galat' : 'redup'],
       ['Pembaca', adc.pembaca.length ? adc.pembaca.map((p) => `${p.uid} (${p.teknologi ?? '?'}, ${p.modalitas ?? '?'})`).join('; ') : 'Tidak ada',
         adc.pembaca.length ? 'ok' : 'galat'],
-      ['Penangkapan', (adc.menangkap ? 'Aktif, format ' + adc.format : 'Tidak aktif')
-        + (adc.mulai_ulang ? `; dimulai ulang otomatis ${adc.mulai_ulang} kali` : '')],
+      ['Penangkapan', (!adc.pembaca.length ? 'Menunggu pembaca' : adc.menangkap ? 'Aktif, format ' + adc.format : 'Tidak aktif')
+        + (adc.mulai_ulang ? `; dimulai ulang otomatis ${adc.mulai_ulang} kali` : '')
+        + (jendelaAktif ? '' : '. Jendela ini sedang tidak aktif: klik halaman sebelum menempel'),
+        jendelaAktif ? '' : 'peringatan'],
       ['Kualitas terakhir', adc.kualitas],
     ]);
+  }
+
+  window.addEventListener('focus', () => { fokusKembali = performance.now(); tampilkanAdc(); });
+  window.addEventListener('blur', tampilkanAdc);
+
+  const uidNol = (uid) => /^[0-]*$/.test(uid ?? '');
+
+  // Di PC kiosk, kejadian terhubung dan terputus untuk pembaca sungguhan
+  // datang dua kali, berselang beberapa milidetik. Kembarannya dibuang.
+  // Kejadian ber-UID nol tidak disaring: itu satu-satunya tanda bahwa
+  // penangkapan perlu dimulai lagi.
+  let kejadianTerakhir = { kunci: null, t: 0 };
+
+  function kejadianKembar(jenis, uid) {
+    const kunci = jenis + '|' + uid;
+    const kini = performance.now();
+    const kembar = !uidNol(uid) && kejadianTerakhir.kunci === kunci && kini - kejadianTerakhir.t < 50;
+    kejadianTerakhir = { kunci, t: kini };
+    return kembar;
   }
 
   function mulaiAdc() {
@@ -452,7 +504,20 @@
       catat('Pustaka WebSDK tidak termuat: jsDelivr tidak terjangkau, atau SRI tidak cocok.', 'galat');
       return;
     }
-    api = new Fingerprint.WebApi();
+    pasangApi(new Fingerprint.WebApi());
+  }
+
+  function pasangApi(baru) {
+    // Penangan pada objek lama dilepas, supaya hanya satu objek yang mengubah
+    // keadaan. Di luar mode pengembangan fungsi ini hanya dipanggil sekali.
+    if (api) for (const nama of PENANGAN_ADC) api[nama] = () => {};
+    api = baru;
+    Object.assign(adc, { terhubung: null, pembaca: [], menangkap: false, format: 'raw', kualitas: null, mulai_ulang: 0 });
+    catatTangkap = true;
+    pernahMulai = false;
+    berhentiTerakhir = null;
+    sampelSejakMulai = 0;
+    formatMeleset = 0;
     api.onCommunicationFailed = () => {
       adc.komunikasi_gagal++;
       if (adc.terhubung !== false) catat('Tidak bisa terhubung ke Authentication Device Client.', 'galat');
@@ -461,18 +526,31 @@
       tampilkanAdc();
     };
     api.onDeviceConnected = (e) => {
-      if (!/^[0-]+$/.test(e.deviceUid ?? '')) catat('Pembaca terhubung: ' + e.deviceUid, 'ok');
-      muatPembaca();
+      if (kejadianKembar('terhubung', e.deviceUid)) return;
+      const nol = uidNol(e.deviceUid);
+      if (!nol) catat('Pembaca terhubung: ' + e.deviceUid, 'ok');
+      muatPembaca({ pemicu: 'terhubung', uid_nol: nol });
     };
-    api.onDeviceDisconnected = (e) => { catat('Pembaca terputus: ' + e.deviceUid, 'galat'); muatPembaca(); };
+    api.onDeviceDisconnected = (e) => {
+      if (kejadianKembar('terputus', e.deviceUid)) return;
+      const nol = uidNol(e.deviceUid);
+      // UID nol bukan pembaca yang dicabut. Pada uji 3 Oktober 2026 kejadian
+      // ini hanya datang selagi tidak ada pembaca yang terpasang.
+      if (nol) catat('ADC melaporkan tidak ada pembaca (kejadian terputus ber-UID nol).', 'peringatan');
+      else catat('Pembaca terputus: ' + e.deviceUid, 'galat');
+      muatPembaca({ pemicu: 'terputus', uid_nol: nol });
+    };
     api.onAcquisitionStarted = () => {
       adc.menangkap = true;
+      berhentiTerakhir = null;
+      sampelSejakMulai = 0;
       if (catatTangkap) catat('Penangkapan dimulai, format ' + adc.format + '.');
       catatTangkap = false;
       tampilkanAdc();
     };
     api.onAcquisitionStopped = () => {
       adc.menangkap = false;
+      berhentiTerakhir = { t: performance.now(), jendela_aktif: document.hasFocus(), sampel: sampelSejakMulai };
       if (catatTangkap) catat('Penangkapan berhenti.');
       tampilkanAdc();
     };
@@ -483,14 +561,14 @@
     };
     api.onErrorOccurred = (e) => catat('Galat pembaca: kode ' + e.error, 'galat');
     api.onSamplesAcquired = terimaSampelAlat;
-    muatPembaca();
+    return muatPembaca({ pemicu: 'muat', uid_nol: null });
   }
 
-  async function muatPembaca() {
+  async function muatPembaca(asal) {
+    const apiIni = api;
     try {
       const daftarUid = await api.enumerateDevices();
-      adc.terhubung = true;
-      adc.pembaca = await Promise.all(daftarUid.map(async (uid) => {
+      const pembaca = await Promise.all(daftarUid.map(async (uid) => {
         try {
           const info = await api.getDeviceInfo(uid);
           return {
@@ -503,38 +581,131 @@
           return { uid, galat: err.message ?? String(err) };
         }
       }));
+      if (api !== apiIni) return;
+      adc.terhubung = true;
+      adc.pembaca = pembaca;
       tampilkanAdc();
-      if (adc.pembaca.length > 0 && !adc.menangkap) {
-        if (!catatTangkap) adc.mulai_ulang++;
-        await mulaiTangkap();
-      }
+      // Pembaca yang baru dicolok selalu dimulai lagi dengan format yang
+      // dipilih, dan dihentikan dulu: belum diketahui apakah ADC melanjutkan
+      // penangkapan yang lama sendiri, dan dengan format apa.
+      const pembacaBaru = asal.pemicu === 'terhubung' && !asal.uid_nol;
+      if (adc.pembaca.length > 0 && (!adc.menangkap || pembacaBaru)) await mulaiTangkap({ asal, paksa: pembacaBaru });
     } catch (err) {
+      if (api !== apiIni) return;
       adc.terhubung = false;
       tampilkanAdc();
       catat('Daftar pembaca tidak bisa dibaca: ' + (err.message ?? err), 'galat');
     }
   }
 
-  async function mulaiTangkap(olehPengguna = false) {
-    if (!api) return;
-    if (olehPengguna) catatTangkap = true;
-    const format = $('#format').value;
+  // Satu rangkaian berhenti-lalu-mulai pada satu waktu, dan formatnya selalu
+  // dibaca dari pemilih. Tanpa antrean, mulai otomatis yang masih berjalan bisa
+  // tetap memakai format lama: ia membaca pemilih (PNG), lalu tab Daftar dibuka
+  // sebelum ADC menjawab, dan karena halaman belum menganggap penangkapan
+  // aktif, tidak ada yang memulainya lagi dengan Raw. Itu dugaan terkuat untuk
+  // tiga sampel PNG yang tiba di tab Daftar pada uji 3 Oktober 2026.
+  const BATAS_ADC_MS = 5000;
+  let tangkapSibuk = false;
+  let tangkapJanji = Promise.resolve();
+  let tangkapLagi = false;
+  let paksaLagi = false;
+
+  // ADC yang tidak menjawab tidak boleh menahan antrean selamanya.
+  function denganBatas(janji, apa) {
+    let pewaktu;
+    const batas = new Promise((_, tolak) => {
+      pewaktu = setTimeout(() => tolak(new Error(`${apa} tidak dijawab ADC dalam ${BATAS_ADC_MS / 1000} detik`)), BATAS_ADC_MS);
+    });
+    return Promise.race([janji, batas]).finally(() => clearTimeout(pewaktu));
+  }
+
+  // paksa: berhenti dulu apa pun yang halaman kira, karena ADC bisa saja masih
+  // menangkap dengan format lama. asal: kejadian ADC yang memicu mulai otomatis.
+  function mulaiTangkap({ olehPengguna = false, paksa = false, asal = null } = {}) {
+    if (!api) return Promise.resolve();
+    if (olehPengguna || paksa) catatTangkap = true;
+    if (tangkapSibuk) {
+      // Mulai otomatis cukup menumpang rangkaian yang berjalan. Yang diminta
+      // pengguna atau dipaksa halaman mendapat satu putaran lagi sesudahnya.
+      if (olehPengguna || paksa) {
+        tangkapLagi = true;
+        paksaLagi ||= paksa;
+      }
+      return tangkapJanji;
+    }
+    if (asal && pernahMulai) catatMulaiUlang(asal);
+    tangkapSibuk = true;
+    tangkapJanji = jalankanTangkap(paksa);
+    return tangkapJanji;
+  }
+
+  async function jalankanTangkap(paksa) {
+    const apiIni = api;
     try {
-      if (adc.menangkap) await api.stopAcquisition();
-      adc.format = format;
-      await api.startAcquisition(format === 'raw' ? Fingerprint.SampleFormat.Raw : Fingerprint.SampleFormat.PngImage);
-      adc.menangkap = true;
-      tampilkanAdc();
+      for (let putaran = 0; putaran < 3; putaran++) {
+        const format = $('#format').value;
+        const berhentiDulu = adc.menangkap || paksa || paksaLagi;
+        tangkapLagi = false;
+        paksaLagi = false;
+        adc.format = format;
+        if (berhentiDulu) {
+          try {
+            await denganBatas(api.stopAcquisition(), 'Perintah berhenti');
+          } catch { /* tidak sedang menangkap, atau ADC diam: mulai tetap dicoba */ }
+        }
+        await denganBatas(api.startAcquisition(format === 'raw' ? Fingerprint.SampleFormat.Raw : Fingerprint.SampleFormat.PngImage), 'Perintah mulai');
+        if (api !== apiIni) return;
+        adc.menangkap = true;
+        pernahMulai = true;
+        berhentiTerakhir = null;
+        sampelSejakMulai = 0;
+        // Pemilih bisa berubah, atau permintaan lain masuk, selagi menunggu ADC.
+        if (!tangkapLagi && $('#format').value === format) break;
+        catatTangkap = true;
+      }
     } catch (err) {
       catat('Penangkapan tidak bisa dimulai: ' + (err.message ?? err), 'galat');
+    } finally {
+      tangkapSibuk = false;
+      tampilkanAdc();
     }
+  }
+
+  function catatMulaiUlang(asal) {
+    adc.mulai_ulang++;
+    const kini = performance.now();
+    const b = berhentiTerakhir;
+    berhentiTerakhir = null;
+    laporan.mulai_ulang.push({
+      waktu: new Date().toISOString(), ke: adc.mulai_ulang, tab: tabAktif,
+      pemicu: asal.pemicu, uid_nol: asal.uid_nol,
+      jendela_aktif: document.hasFocus(),
+      fokus_kembali_ms_lalu: fokusKembali === null ? null : Math.round(kini - fokusKembali),
+      berhenti_ms_lalu: b ? Math.round(kini - b.t) : null,
+      jendela_aktif_saat_berhenti: b ? b.jendela_aktif : null,
+      sampel_sebelum_berhenti: b ? b.sampel : null,
+    });
+    batasi(laporan.mulai_ulang, 200);
+    const sebab = [];
+    if (asal.pemicu === 'terhubung' && !asal.uid_nol) sebab.push('pembaca baru terhubung');
+    if (b) {
+      sebab.push(`berhenti ${Math.round((kini - b.t) / 100) / 10} detik sebelumnya saat jendela ${b.jendela_aktif ? 'aktif' : 'tidak aktif'}, `
+        + `setelah ${b.sampel} sampel`);
+    }
+    if (!sebab.length) sebab.push('tanpa kejadian berhenti sebelumnya');
+    catat(`Penangkapan dimulai ulang otomatis (ke-${adc.mulai_ulang}): ${sebab.join('; ')}.`);
   }
 
   async function hentiTangkap() {
     if (!api) return;
     catatTangkap = true;
+    tangkapLagi = false;
+    paksaLagi = false;
     try {
-      await api.stopAcquisition();
+      // Rangkaian mulai yang masih berjalan dibiarkan selesai, supaya perintah
+      // berhenti ini yang terakhir sampai ke ADC.
+      if (tangkapSibuk) await tangkapJanji;
+      await denganBatas(api.stopAcquisition(), 'Perintah berhenti');
       adc.menangkap = false;
       tampilkanAdc();
     } catch (err) {
@@ -644,6 +815,7 @@
 
   function terimaSampelAlat(e) {
     const t0 = performance.now();
+    sampelSejakMulai++;
     let sampel;
     let daftar;
     try {
@@ -717,11 +889,40 @@
     peringatan.textContent = teks;
   }
 
+  // Sampel dari alat yang formatnya bukan yang dipilih berarti ADC menangkap
+  // dengan format lain daripada yang diminta halaman. Menolaknya saja tidak
+  // cukup: pada uji 3 Oktober 2026 tiga tempelan berturut-turut ditolak sampai
+  // halaman dimuat ulang. Kini penangkapan dimulai ulang dengan format yang
+  // dipilih, dan kalau dua kali tidak menolong, halaman meminta dimuat ulang.
+  let formatMeleset = 0;
+
+  function luruskanFormat(sampel) {
+    if (sampel.asal !== 'alat') return;
+    const dipilih = $('#format').value;
+    if (sampel.format === dipilih) {
+      formatMeleset = 0;
+      return;
+    }
+    formatMeleset++;
+    const dimulaiUlang = formatMeleset <= 2;
+    laporan.format_meleset.push({
+      waktu: new Date().toISOString(), datang: sampel.format, dipilih, tab: tabAktif, berturut: formatMeleset, dimulai_ulang: dimulaiUlang,
+    });
+    batasi(laporan.format_meleset, 100);
+    if (dimulaiUlang) {
+      catat(`Sampel datang sebagai ${sampel.format}, padahal format yang dipilih ${dipilih}. Penangkapan dimulai ulang.`, 'peringatan');
+      mulaiTangkap({ paksa: true });
+    } else {
+      catat(`Sampel masih datang sebagai ${sampel.format}, padahal format yang dipilih ${dipilih}. Muat ulang halaman (F5); laporan tidak hilang.`, 'galat');
+    }
+  }
+
   function arahkan(sampel) {
     if (sampel.format === 'raw' && sampel.dpi) {
       dpiAlatTerakhir = sampel.dpi;
       periksaDpi();
     }
+    luruskanFormat(sampel);
     if ((tabAktif === 'daftar' || tabAktif === 'identifikasi') && sampel.format !== 'raw') {
       catat(`Sampel ${sampel.format} diabaikan: pendaftaran dan identifikasi hanya memakai Raw.`, 'galat');
       return;
@@ -746,10 +947,15 @@
   // untuk tab Tangkap. Uji 3 Oktober 2026 mendaftarkan hampir semua jari
   // dengan PNG karena formatnya tertinggal setelah tangkap.
   function pastikanRaw() {
-    if ($('#format').value === 'raw') return;
-    $('#format').value = 'raw';
-    catat('Format diganti ke Raw: pendaftaran dan identifikasi hanya memakai Raw.', 'peringatan');
-    if (adc.menangkap) mulaiTangkap(true);
+    const pemilihBerubah = $('#format').value !== 'raw';
+    if (pemilihBerubah) {
+      $('#format').value = 'raw';
+      catat('Format diganti ke Raw: pendaftaran dan identifikasi hanya memakai Raw.', 'peringatan');
+    }
+    // Yang dibandingkan adalah format yang terakhir diminta ke ADC. Rangkaian
+    // mulai yang masih berjalan ikut dihitung: ia sudah membaca pemilih yang
+    // lama. Kalau penangkapan sedang berhenti, mulai berikutnya membaca Raw.
+    if ((pemilihBerubah || adc.format !== 'raw') && (adc.menangkap || tangkapSibuk)) mulaiTangkap({ olehPengguna: true, paksa: true });
   }
 
   // ---------- Tangkap ----------
@@ -917,8 +1123,9 @@
   // setiap relawan melewati semua jarinya lima putaran. Percobaan selesai
   // begitu orangnya dikenali, atau setelah tiga tempelan gagal. Ini meniru
   // pemakaian nyata (satu sampai tiga tempelan per orang) dan menghindari lima
-  // tempelan berturut-turut pada jari yang sama, yang di PC kiosk selalu
-  // gagal mulai tempelan kelima tanpa sebab yang sudah diketahui.
+  // tempelan berturut-turut pada jari yang sama. Di PC kiosk, dengan galeri
+  // yang masih 700 DPI, tempelan kelima dan seterusnya selalu gagal, dan
+  // sebabnya belum diketahui.
   const PUTARAN = 5;
   const TEMPELAN_ASING = 5;
   const TEMPELAN_PERCOBAAN = 3;
@@ -1325,7 +1532,10 @@
       peramban: navigator.userAgent,
       jembatan: s ? { versi: s.versi, mode: s.mode, perangkat: s.perangkat, waktu: s.waktu, alat: s.alat, galeri: s.galeri } : null,
       sesi: laporan.sesi,
-      adc: { terhubung: adc.terhubung, komunikasi_gagal: adc.komunikasi_gagal, pembaca: adc.pembaca, format_aktif: adc.format, mulai_ulang: adc.mulai_ulang },
+      adc: {
+        terhubung: adc.terhubung, komunikasi_gagal: adc.komunikasi_gagal, pembaca: adc.pembaca, format_aktif: adc.format, mulai_ulang: adc.mulai_ulang,
+        riwayat_mulai_ulang: laporan.mulai_ulang, format_meleset: laporan.format_meleset,
+      },
       tangkap: laporan.tangkap,
       daftar: laporan.daftar,
       identifikasi: { hitungan, percobaan, urutan: laporan.urutan, urutan_sebelumnya: laporan.urutan_sebelumnya, tempelan: laporan.identifikasi },
@@ -1336,6 +1546,7 @@
       detak: laporan.detak,
       csp_dilanggar: laporan.csp_dilanggar,
       galat: laporan.galat,
+      catatan: laporan.catatan,
     };
     $('#laporan').value = JSON.stringify(isi, null, 1);
     catat('Laporan disusun (' + $('#laporan').value.length + ' karakter).', 'ok');
@@ -1369,9 +1580,12 @@
     tombol.addEventListener('click', () => bukaTab(tombol.dataset.tab));
   }
   $('#muat-status').addEventListener('click', muatStatus);
-  $('#mulai-tangkap').addEventListener('click', () => mulaiTangkap(true));
+  $('#mulai-tangkap').addEventListener('click', () => mulaiTangkap({ olehPengguna: true, paksa: true }));
   $('#henti-tangkap').addEventListener('click', hentiTangkap);
-  $('#format').addEventListener('change', () => { if (adc.menangkap) mulaiTangkap(true); });
+  $('#format').addEventListener('change', () => {
+    if (tabAktif === 'daftar' || tabAktif === 'identifikasi') pastikanRaw();
+    else if (adc.menangkap || tangkapSibuk) mulaiTangkap({ olehPengguna: true, paksa: true });
+  });
   $('#relawan').addEventListener('change', kosongkanSlot);
   $('#jari').addEventListener('change', kosongkanSlot);
   $('#kosongkan-daftar').addEventListener('click', kosongkanSlot);
@@ -1400,6 +1614,7 @@
   });
 
   pulihkan();
+  catat(`Halaman uji ${VERSI_HALAMAN} dimuat.`);
   tampilkanAdc();
   tampilkanSlot();
   tampilkanHitungan();
@@ -1413,7 +1628,7 @@
     dimuat: new Date().toISOString(), halaman: VERSI_HALAMAN,
     jembatan: statusJembatan ? { versi: statusJembatan.versi, mode: statusJembatan.mode, perangkat: statusJembatan.perangkat } : null,
   });
-  if (laporan.sesi.length > 50) laporan.sesi.splice(0, laporan.sesi.length - 50);
+  batasi(laporan.sesi, 50);
   await muatGaleri();
   mulaiAdc();
   setInterval(muatStatus, 15000);
