@@ -14,7 +14,7 @@
   diubah, hash-nya harus dihitung ulang (lihat README.md), atau peramban
   menolak menjalankannya.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5/TPpR+b1UfpnwLBH6fh23Wm8jtfhz4AxhtwxygwI/k=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-VKmXTtmFmDCjUD1V9qkYXExKuE5F/0topYOwQVbH5uo=' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:*; base-uri 'none'; form-action 'none'">
 <title>Uji jembatan sidik jari</title>
 <style>
   :root { --biru: #1d4ed8; --hijau: #15803d; --merah: #b91c1c; --kuning: #a16207; --abu: #6b7280; --garis: #d1d5db; }
@@ -169,7 +169,7 @@
       <button id="terapkan-dpi">Terapkan DPI</button>
       <button id="ukur">Ukur waktu 1:N</button>
     </div>
-    <p class="redup">Kalibrasi memakai gambar pendaftaran sesi ini, yang hanya ada di memori jembatan. Jalankan sebelum jembatan dimulai ulang.</p>
+    <p class="redup">Kalibrasi memakai gambar pendaftaran sesi ini, yang hanya ada di memori jembatan. Jalankan sebelum jembatan dimulai ulang. DPI dinilai dari kolom "Median − p99": median skor jari yang sama dikurangi p99 skor jari yang berbeda. Kolom "Jarak" hanya membandingkan dua pasangan paling ekstrem.</p>
     <table id="tabel-kalibrasi"></table>
     <table id="tabel-ukur"></table>
     <p id="catatan-ukur" class="redup"></p>
@@ -206,14 +206,14 @@
 <script>
 'use strict';
 (async () => {
-  const VERSI_HALAMAN = '0.1.4';
+  const VERSI_HALAMAN = '0.2.0';
   const $ = (pemilih) => document.querySelector(pemilih);
 
   // ---------- Catatan untuk laporan dan log di layar ----------
 
   const laporan = {
     tangkap: [], daftar: [], identifikasi: [], sampel_kembar: [],
-    kalibrasi: null, penerapan_dpi: [], ukur: null, urutan: null, urutan_sebelumnya: [],
+    kalibrasi: null, saran_dpi: null, penerapan_dpi: [], ukur: null, urutan: null, urutan_sebelumnya: [],
     detak: { ok: 0, gagal: 0, alat_1: 0, alat_0: 0, terakhir: null },
     csp_dilanggar: [], galat: [], sesi: [],
     mulai_ulang: [], format_meleset: [], catatan: [],
@@ -399,6 +399,9 @@
       ['Versi', data.versi],
       ['Mode', data.mode, data.mode === 'pengembangan' ? 'peringatan' : ''],
       ['Perangkat', data.perangkat],
+      // Bukan rahasia. Harus sama dengan kolom "Sidik kunci" untuk perangkat ini
+      // di panel admin server.
+      ['Sidik kunci', data.sidik_kunci],
       ['Waktu PC', data.waktu],
       ['Alat menurut Windows', a.keterangan, a.terhubung === true ? 'ok' : a.terhubung === false ? 'galat' : 'redup'],
       ['Galeri', `${g.identitas} identitas, ${g.templat} templat, DPI ${g.dpi}`
@@ -1384,13 +1387,42 @@
 
   // ---------- Kalibrasi dan ukur ----------
 
-  // Uji 3 Oktober 2026 menerapkan 800 DPI, yang jaraknya −0,7, padahal 700
-  // jaraknya 42,2. Kini DPI dengan jarak terbesar dipilih otomatis, dan DPI
-  // yang jaraknya ≤ 0 tidak bisa diterapkan.
-  let jarakDpi = null;
+  // DPI dinilai dari selisih antara median skor jari yang sama dan p99 skor
+  // jari yang berbeda. "Jarak" dari jembatan (skor sama-jari terendah dikurangi
+  // skor beda-jari tertinggi) tidak dipakai untuk memilih, karena ditentukan
+  // dua pasangan paling ekstrem saja. Di PC kiosk 5 Oktober 2026, dengan 36
+  // jari, jaraknya negatif di semua DPI, dan halaman 0.1.4 menyarankan 800 DPI
+  // (median sama-jari 12,9) alih-alih 508 (median 142,8).
+  //
+  // DPI yang selisihnya ≤ 0 tidak bisa diterapkan. Kalau tidak ada DPI yang
+  // selisihnya di atas 0, halaman tidak menyarankan apa pun.
+  let selisihDpi = null;
   let dpiTerbaik = null;
   let dpiDisarankan = null;
   let dpiDipilih = false;
+
+  const selisih = (h) => Math.round((h.sama_jari.median - h.beda_jari.p99) * 10) / 10;
+
+  // Saran DPI dari jawaban /kalibrasi. Tidak menyentuh halaman.
+  //   selisih     Map DPI → selisih
+  //   puncak      DPI yang selisihnya terbesar
+  //   terbaik     sama dengan puncak, atau null kalau selisihnya pun tidak di atas 0
+  //   disarankan  DPI yang sebaiknya dipakai galeri, atau null (tanpa saran)
+  //   alat        DPI yang dilaporkan alat, kalau hanya satu
+  function saranDpi(data) {
+    const nilai = new Map(data.hasil.map((h) => [h.dpi, selisih(h)]));
+    const puncak = data.hasil.reduce((a, b) => (nilai.get(b.dpi) > nilai.get(a.dpi) ? b : a)).dpi;
+    const alat = data.dpi_alat?.length === 1 ? data.dpi_alat[0] : null;
+    if (!(nilai.get(puncak) > 0)) return { selisih: nilai, puncak, terbaik: null, disarankan: null, alat };
+    // Selisih antar-DPI yang berdekatan (500, 508, 512) hanyalah derau: di uji
+    // 5 Oktober 2026 tetangga terdekat berbeda sampai 13%, sedangkan DPI yang
+    // memang salah jatuh ke 63% atau kurang. DPI galeri yang sekarang, lalu DPI
+    // yang dilaporkan alat, didahulukan selama selisihnya minimal 70% dari yang
+    // terbesar.
+    const setara = (dpi) => nilai.get(dpi) >= 0.7 * nilai.get(puncak);
+    const disarankan = setara(data.dpi_sekarang) ? data.dpi_sekarang : alat !== null && setara(alat) ? alat : puncak;
+    return { selisih: nilai, puncak, terbaik: puncak, disarankan, alat };
+  }
 
   function pastikanPilihanDpi(dpi) {
     const pilihan = $('#dpi-terapkan');
@@ -1412,53 +1444,65 @@
       return;
     }
     laporan.kalibrasi = data;
+    const saran = saranDpi(data);
+    selisihDpi = saran.selisih;
+    dpiTerbaik = saran.terbaik;
+    dpiDisarankan = saran.disarankan;
+    laporan.saran_dpi = {
+      waktu: new Date().toISOString(), ukuran: 'median sama-jari − p99 beda-jari',
+      terbaik: dpiTerbaik, disarankan: dpiDisarankan, selisih: Object.fromEntries(selisihDpi),
+    };
     tabelKolom($('#tabel-kalibrasi'),
-      ['DPI', 'Sama-jari terendah', 'p5', 'Median', '< 40', '< 50', '< 60', 'Beda-jari tertinggi', 'p99', '≥ 40', '≥ 50', '≥ 60', 'Jarak'],
+      ['DPI', 'Sama-jari terendah', 'p5', 'Median', '< 40', '< 50', '< 60', 'Beda-jari tertinggi', 'p99', '≥ 40', '≥ 50', '≥ 60', 'Jarak', 'Median − p99'],
       data.hasil.map((h) => [h.dpi, h.sama_jari.terendah, h.sama_jari.p5, h.sama_jari.median, h.sama_jari.di_bawah_40,
         h.sama_jari.di_bawah_50, h.sama_jari.di_bawah_60, h.beda_jari.tertinggi, h.beda_jari.p99, h.beda_jari.di_atas_40,
-        h.beda_jari.di_atas_50, h.beda_jari.di_atas_60, h.jarak]));
-    const terbaik = data.hasil.reduce((a, b) => (b.jarak > a.jarak ? b : a));
-    jarakDpi = new Map(data.hasil.map((h) => [h.dpi, h.jarak]));
-    dpiTerbaik = terbaik.dpi;
-    // Selisih antar-DPI yang berdekatan (500, 508, 512) hanyalah derau: jarak
-    // dihitung dari skor terendah dan tertinggi, dan di uji 3 Oktober 2026
-    // tetangga terdekat berbeda sampai 20%, sedangkan DPI yang memang salah
-    // jatuh ke 55% atau kurang. DPI galeri yang sekarang, lalu DPI yang
-    // dilaporkan alat, didahulukan selama jaraknya minimal 70% dari yang terbaik.
-    const setara = (dpi) => jarakDpi.get(dpi) > 0 && jarakDpi.get(dpi) >= 0.7 * terbaik.jarak;
-    const dpiAlat = data.dpi_alat?.length === 1 ? data.dpi_alat[0] : null;
-    dpiDisarankan = setara(data.dpi_sekarang) ? data.dpi_sekarang : dpiAlat !== null && setara(dpiAlat) ? dpiAlat : terbaik.dpi;
+        h.beda_jari.di_atas_50, h.beda_jari.di_atas_60, h.jarak, selisihDpi.get(h.dpi)]));
     $('#dpi-terapkan').replaceChildren(...data.hasil.map((h) => {
       const o = document.createElement('option');
-      const tanda = [h.dpi === dpiTerbaik ? 'terbaik' : null, h.dpi === data.dpi_sekarang ? 'galeri' : null, h.dpi === dpiAlat ? 'alat' : null]
+      const tanda = [h.dpi === dpiTerbaik ? 'terbaik' : null, h.dpi === data.dpi_sekarang ? 'galeri' : null, h.dpi === saran.alat ? 'alat' : null]
         .filter(Boolean);
       o.value = String(h.dpi);
-      o.textContent = `${h.dpi} (jarak ${h.jarak}${tanda.length ? ', ' + tanda.join(', ') : ''})`;
+      o.textContent = `${h.dpi} (selisih ${selisihDpi.get(h.dpi)}${tanda.length ? ', ' + tanda.join(', ') : ''})`;
       return o;
     }));
-    $('#dpi-terapkan').value = String(dpiDisarankan);
+    // Tanpa saran, pemilih tetap di DPI galeri yang sekarang.
+    pastikanPilihanDpi(dpiDisarankan ?? data.dpi_sekarang);
+    $('#dpi-terapkan').value = String(dpiDisarankan ?? data.dpi_sekarang);
     dpiDipilih = true;
-    catat(`Kalibrasi selesai: ${data.gambar} gambar dari ${data.identitas} identitas. `
-      + (dpiDisarankan === data.dpi_sekarang
-        ? `DPI galeri ${data.dpi_sekarang} (jarak ${jarakDpi.get(data.dpi_sekarang)}) setara dengan yang terbaik `
-          + `(${dpiTerbaik}, jarak ${terbaik.jarak}); tidak perlu diganti.`
-        : `DPI galeri ${data.dpi_sekarang} (jarak ${jarakDpi.get(data.dpi_sekarang) ?? '—'}) sebaiknya diganti: `
-          + `${dpiDisarankan} (jarak ${jarakDpi.get(dpiDisarankan)}) sudah dipilih, klik "Terapkan DPI" dua kali.`),
-      dpiDisarankan === data.dpi_sekarang ? 'ok' : 'peringatan');
+    const sebut = (dpi) => `${dpi} (selisih ${selisihDpi.get(dpi) ?? '—'})`;
+    const awal = `Kalibrasi selesai: ${data.gambar} gambar dari ${data.identitas} identitas. `;
+    if (dpiDisarankan === null) {
+      catat(awal + `Tidak ada DPI yang memisahkan jari yang sama dari jari yang berbeda: selisih tertinggi ${selisihDpi.get(saran.puncak)}, pada DPI ${saran.puncak}. `
+        + 'Kalibrasi tidak menyarankan DPI apa pun. Periksa mutu tempelan pendaftaran.', 'galat');
+      return;
+    }
+    if (dpiDisarankan === data.dpi_sekarang) {
+      catat(awal + (dpiTerbaik === data.dpi_sekarang
+        ? `DPI galeri ${sebut(data.dpi_sekarang)} adalah yang terbaik; tidak perlu diganti.`
+        : `DPI galeri ${sebut(data.dpi_sekarang)} setara dengan yang terbaik, ${sebut(dpiTerbaik)}; tidak perlu diganti.`), 'ok');
+    } else {
+      catat(awal + `DPI galeri ${sebut(data.dpi_sekarang)} sebaiknya diganti: ${sebut(dpiDisarankan)} sudah dipilih, `
+        + 'klik "Terapkan DPI" dua kali.', 'peringatan');
+    }
+    const jarak = data.hasil.find((h) => h.dpi === dpiDisarankan)?.jarak;
+    if (typeof jarak === 'number' && jarak <= 0) {
+      catat(`Pada DPI ${dpiDisarankan} jaraknya ${jarak}: skor sama-jari terendah masih di bawah skor beda-jari tertinggi. `
+        + 'Itu ditentukan pasangan tempelan yang paling ekstrem, bukan tanda DPI yang salah.', 'peringatan');
+    }
   }
 
   async function terapkanDpi() {
     const dpi = Number($('#dpi-terapkan').value);
-    const jarak = jarakDpi?.get(dpi);
-    if (jarak !== undefined && jarak <= 0) {
-      catat(`DPI ${dpi} tidak diterapkan: jaraknya ${jarak}, jadi skor jari sama dan jari beda bertumpang tindih. `
-        + `DPI yang disarankan ${dpiDisarankan}.`, 'galat');
+    const nilai = selisihDpi?.get(dpi);
+    if (nilai !== undefined && nilai <= 0) {
+      catat(`DPI ${dpi} tidak diterapkan: selisihnya ${nilai}, jadi median skor jari yang sama tidak melampaui skor jari yang berbeda.`
+        + (dpiDisarankan !== null ? ` DPI yang disarankan ${dpiDisarankan}.` : ''), 'galat');
       return;
     }
     if (dpiDisarankan !== null && dpi !== dpiDisarankan) catat(`DPI ${dpi} bukan yang disarankan kalibrasi (${dpiDisarankan}).`, 'peringatan');
     const { kode, data } = await panggil('POST', '/kalibrasi', { terapkan: dpi });
     laporan.penerapan_dpi.push({
-      waktu: new Date().toISOString(), dpi, disarankan: dpiDisarankan, terbaik: dpiTerbaik, jarak: jarak ?? null, kode, pesan: data?.message ?? null,
+      waktu: new Date().toISOString(), dpi, disarankan: dpiDisarankan, terbaik: dpiTerbaik, selisih: nilai ?? null, kode, pesan: data?.message ?? null,
     });
     catat(kode === 200 ? `DPI galeri kini ${dpi}; ${data.templat} templat diekstrak ulang.` : 'Terapkan DPI: ' + (data?.message ?? kode),
       kode === 200 ? 'ok' : 'galat');
@@ -1530,7 +1574,7 @@
       halaman: VERSI_HALAMAN,
       dibuat: new Date().toISOString(),
       peramban: navigator.userAgent,
-      jembatan: s ? { versi: s.versi, mode: s.mode, perangkat: s.perangkat, waktu: s.waktu, alat: s.alat, galeri: s.galeri } : null,
+      jembatan: s ? { versi: s.versi, mode: s.mode, perangkat: s.perangkat, sidik_kunci: s.sidik_kunci, waktu: s.waktu, alat: s.alat, galeri: s.galeri } : null,
       sesi: laporan.sesi,
       adc: {
         terhubung: adc.terhubung, komunikasi_gagal: adc.komunikasi_gagal, pembaca: adc.pembaca, format_aktif: adc.format, mulai_ulang: adc.mulai_ulang,
@@ -1541,6 +1585,7 @@
       identifikasi: { hitungan, percobaan, urutan: laporan.urutan, urutan_sebelumnya: laporan.urutan_sebelumnya, tempelan: laporan.identifikasi },
       sampel_kembar: laporan.sampel_kembar,
       kalibrasi: laporan.kalibrasi,
+      saran_dpi: laporan.saran_dpi,
       penerapan_dpi: laporan.penerapan_dpi,
       ukur: laporan.ukur,
       detak: laporan.detak,
