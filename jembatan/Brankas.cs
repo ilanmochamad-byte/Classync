@@ -4,7 +4,9 @@
 // kunci.bin di folder data:
 // - ID perangkat, yang menamai kiosk ini di server. Bukan rahasia;
 // - kunci HMAC, untuk menandatangani hasil jembatan. Server memegang
-//   salinannya setelah dipasangkan di sub-langkah 4.2;
+//   salinannya setelah kiosk dipasangkan: admin menjalankan jembatan dengan
+//   --pasangan di PC kiosk, lalu menyalin ID dan kunci itu ke konfigurasi
+//   server. Itu satu-satunya jalan kunci ini keluar dari brankas;
 // - kunci templat, untuk mengenkripsi templat sidik jari. Kunci ini TIDAK
 //   PERNAH meninggalkan PC kiosk, jadi salinan templat di server tidak bisa
 //   dibuka di sana.
@@ -56,12 +58,18 @@ sealed partial class Brankas
 
     public string Perangkat { get; }
 
+    // Delapan karakter untuk mencocokkan kunci HMAC di sini dengan salinannya
+    // di server tanpa memperlihatkan kuncinya. Sama dengan sjSidikKunci() di
+    // includes/sidik_jari.php.
+    public string SidikKunci { get; }
+
     Brankas(string folder, string perangkat, byte[] kunciHmac, byte[] kunciTemplat)
     {
         _folder = folder;
         Perangkat = perangkat;
         _kunciHmac = kunciHmac;
         _kunciTemplat = kunciTemplat;
+        SidikKunci = Sidik(kunciHmac);
     }
 
     // Membuka brankas di folder data, atau membuatnya kalau belum ada.
@@ -109,6 +117,39 @@ sealed partial class Brankas
         }
         return new Brankas(folder, isi.Perangkat,
                            Convert.FromBase64String(isi.KunciHmac), Convert.FromBase64String(isi.KunciTemplat));
+    }
+
+    // ID perangkat dan kunci HMAC untuk disalin admin ke konfigurasi server.
+    // Hanya untuk perintah --pasangan di konsol: jembatan yang sedang melayani
+    // HTTP tidak pernah memanggilnya.
+    //
+    // Hanya membaca. Kalau kunci.bin belum ada, jembatan belum pernah jalan di
+    // folder itu, dan kunci tidak boleh lahir dari perintah ini.
+    public static Pasangan BacaPasangan(string folder)
+    {
+        var jalur = Path.Combine(folder, NamaBerkasKunci);
+        IsiKunci isi;
+        try
+        {
+            isi = BacaKunci(jalur);
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new BrankasRusakException(
+                $"{NamaBerkasKunci} belum ada di {folder}. Jalankan jembatan sekali dulu, supaya kuncinya dibuat.", e);
+        }
+        catch (UnauthorizedAccessException e)
+        {
+            throw new BrankasRusakException(
+                $"{NamaBerkasKunci} di {folder} tidak boleh dibaca akun ini. "
+                + "Jalankan perintahnya sebagai Administrator.", e);
+        }
+        catch (Exception e) when (e is CryptographicException or JsonException or FormatException or IOException)
+        {
+            throw new BrankasRusakException($"{NamaBerkasKunci} di {folder} tidak bisa dibuka.", e);
+        }
+        var kunci = Convert.FromBase64String(isi.KunciHmac);
+        return new Pasangan(isi.Perangkat, Convert.ToHexStringLower(kunci), Sidik(kunci), isi.Dibuat);
     }
 
     public static bool TantanganSah(string? tantangan) => Cocok(PolaTantangan(), tantangan);
@@ -203,6 +244,8 @@ sealed partial class Brankas
 
     TandaTangan Tandatangani(string pesan) =>
         new(pesan, Convert.ToHexStringLower(HMACSHA256.HashData(_kunciHmac, Encoding.ASCII.GetBytes(pesan))));
+
+    static string Sidik(byte[] kunciHmac) => Convert.ToHexStringLower(SHA256.HashData(kunciHmac))[..8];
 
     // Tiap rekaman terikat pada identitas, jari, urutan, dan versinya. Rekaman
     // yang dipindah ke baris lain gagal didekripsi.
@@ -314,9 +357,17 @@ sealed record RekamanTemplat(string Identitas, string Jari, int Urutan, string V
 
 sealed record TandaTangan(string Pesan, string Hmac);
 
+// Yang disalin admin ke konfigurasi server saat memasangkan kiosk. KunciHmac
+// berupa 64 karakter hex, bentuk yang dibaca includes/sidik_jari.php.
+sealed record Pasangan(string Perangkat, string KunciHmac, string SidikKunci, string Dibuat)
+{
+    // Kunci tidak ikut tercetak kalau rekaman ini sampai ke log.
+    public override string ToString() => $"Pasangan {{ Perangkat = {Perangkat}, SidikKunci = {SidikKunci} }}";
+}
+
 // Isi kunci.bin. Kunci dalam base64.
 sealed record IsiKunci(int Versi, string Perangkat, string KunciHmac, string KunciTemplat, string Dibuat);
 
-// kunci.bin tidak bisa dibuka, atau hilang padahal templat ada. Jembatan
-// harus berhenti.
+// kunci.bin tidak bisa dibuka, hilang padahal templat ada, atau belum ada saat
+// pasangannya diminta. Jembatan harus berhenti.
 sealed class BrankasRusakException(string pesan, Exception? sebab = null) : Exception(pesan, sebab);
