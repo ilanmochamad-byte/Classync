@@ -1,4 +1,4 @@
-# Jembatan sidik jari (prototipe 4.1)
+# Jembatan sidik jari
 
 Layanan kecil untuk PC kiosk absensi siswa. Halaman kiosk menangkap sidik jari
 lewat HID Authentication Device Client (ADC) dengan pembaca U.are.U 4500, lalu
@@ -6,8 +6,10 @@ mengirimkannya ke jembatan ini. Jembatan mencocokkannya 1:N dengan SourceAFIS
 dan menandatangani hasilnya dengan HMAC, supaya server bisa memastikan
 absensi itu benar-benar datang dari kiosk.
 
-Status: **prototipe**. Hanya untuk diuji di PC kiosk dengan relawan dewasa.
-Belum tersambung ke server sekolah; sambungannya dikerjakan di sub-langkah 4.2.
+Status per 0.2.0: prototipe 4.1 sudah diuji di PC kiosk dengan relawan dewasa.
+Jembatan kini bisa dipasangkan dengan server, dan server menerima detak
+bertanda tangan darinya (sub-langkah 4.2). Absensi lewat sidik jari belum
+dibuka: pendaftaran siswa dikerjakan di 4.3, dan kiosknya di 4.4.
 
 Folder ini tidak ikut deploy: `.cpanel.yml` tidak menyalinnya ke server.
 
@@ -16,10 +18,10 @@ Folder ini tidak ikut deploy: `.cpanel.yml` tidak menyalinnya ke server.
 | Berkas | Guna |
 |---|---|
 | `JembatanSidikJari.csproj`, `packages.lock.json` | Proyek .NET 10. Semua paket dipin dan dikunci beserta hash isinya. |
-| `Program.cs` | Pintu masuk: layanan/konsol, Kestrel di `127.0.0.1:47890`, penjaga Host/Origin/CORS, rute, cek alat lewat WMI. |
-| `Brankas.cs` | Kunci perangkat, tanda tangan HMAC, dan enkripsi templat. |
+| `Program.cs` | Pintu masuk: layanan/konsol, Kestrel di `127.0.0.1:47890`, penjaga Host/Origin/CORS, rute, cek alat lewat WMI, dan perintah `--pasangan`. |
+| `Brankas.cs` | Kunci perangkat dan sidiknya, tanda tangan HMAC, dan enkripsi templat. |
 | `Pencocok.cs` | Membaca sampel, ekstraksi SourceAFIS, identifikasi 1:N, pendaftaran, kalibrasi, ukur waktu. |
-| `wwwroot/uji.html` | Halaman uji di `http://127.0.0.1:47890/`, tertanam di dalam `.exe`. |
+| `wwwroot/uji.html` | Halaman uji di `http://127.0.0.1:47890/`, tertanam di dalam `.exe`. Hanya disajikan kalau jembatan dijalankan di jendela konsol. |
 | `pasang-layanan.ps1`, `hapus-layanan.ps1` | Memasang dan mencabut layanan Windows. |
 | `kebijakan-chrome.reg`, `cabut-kebijakan-chrome.reg` | Mengizinkan dan mencabut akses halaman kiosk ke 127.0.0.1 di Chrome/Edge. |
 
@@ -62,6 +64,20 @@ penangkapan bisa diuji tanpa Authentication Device Client. Di luar Windows,
 jembatan menolak berjalan tanpa `--pengembangan`, dan layanan Windows
 menolak `--pengembangan`.
 
+Argumen jembatan:
+
+| Argumen | Guna |
+|---|---|
+| `--port <n>` | Port di 127.0.0.1. Bawaannya 47890. |
+| `--data <folder>` | Folder data. Bawaannya `C:\ProgramData\JembatanSidikJari`. |
+| `--pasangan` | Menampilkan ID perangkat dan kunci HMAC untuk disalin ke server, lalu keluar tanpa menyalakan server. Hanya di jendela konsol; ditolak layanan. |
+| `--pengembangan` | Uji di luar PC kiosk. Wajib di luar Windows, dan ditolak layanan Windows. |
+| `--asal-kiosk <asal>` | Hanya bersama `--pengembangan`. Mengganti asal halaman kiosk dengan `http://127.0.0.1:<port>` atau `http://localhost:<port>`, untuk menguji rantainya dengan server lokal. |
+| `--rute-layanan` | Hanya bersama `--pengembangan`. Hanya membuka rute yang ada dalam mode layanan. |
+
+Dua argumen terakhir tidak bisa sampai ke PC kiosk: keduanya menuntut
+`--pengembangan`, dan layanan menolak `--pengembangan`.
+
 ## Paket untuk PC kiosk
 
 Salin ke USB: `jembatan-sidik-jari.exe`, `pasang-layanan.ps1`,
@@ -73,26 +89,124 @@ paket dibuat:
 Get-FileHash .\jembatan-sidik-jari.exe -Algorithm SHA256
 ```
 
-Panel Jembatan di halaman uji menampilkan versi `.exe` yang sedang jalan,
-berbentuk `0.1.4+<commit>`. Bangun paket dari folder kerja yang bersih, yaitu
+Versi `.exe` yang sedang jalan berbentuk `0.2.0+<commit>`. Versi itu tampil di
+keluaran `pasang-layanan.ps1`, di `http://127.0.0.1:47890/status`, dan di panel
+admin setelah detak pertama. Bangun paket dari folder kerja yang bersih, yaitu
 setelah semua perubahan di-commit, supaya commit itu memang isi paketnya.
 
-## Uji di PC kiosk
+## Memasang di PC kiosk dan memasangkannya dengan server
+
+Ini pekerjaan sub-langkah 4.2. Sesudahnya server mengenali kiosk ini, dan
+detaknya tampil di panel admin, menu Laporan > Kiosk Sidik Jari. Yang harus
+sudah ada:
+
+- di PC kiosk: driver pembaca, ADC, dan kebijakan Chrome dari uji 4.1 (fase A,
+  dan fase C langkah 5, di bawah);
+- di server: bagian server 4.2 sudah ter-deploy, kedua tabelnya sudah dibuat,
+  dan berkas konfigurasi `sidik-jari-classync.php` sudah berisi rahasia
+  tantangan.
+
+Kerjakan dengan akun admin, di luar jam kiosk.
+
+1. **Pasang layanan.** Salin paket ke `C:\JembatanUji\`, cocokkan hash
+   `.exe`-nya, lalu dari PowerShell "Run as administrator" di folder itu:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\pasang-layanan.ps1
+   ```
+
+   Skrip yang sama dipakai untuk memperbarui `.exe`: layanan lama dihentikan
+   dan diganti, sedangkan kunci dan templat di folder data dibiarkan. Di
+   keluarannya, baris "Versi" harus berawalan `0.2.0` dan "Mode" harus
+   `layanan`.
+2. **Tampilkan pasangannya.** Masih di PowerShell admin:
+
+   ```powershell
+   & "$env:ProgramFiles\JembatanSidikJari\jembatan-sidik-jari.exe" --pasangan
+   ```
+
+   Keluarannya ID perangkat, kunci HMAC, sidik kunci, dan blok empat baris
+   untuk `$sj_perangkat`. Perintah ini hanya membaca `kunci.bin`, jadi layanan
+   boleh tetap berjalan. Kalau jawabannya "tidak boleh dibaca akun ini",
+   PowerShell-nya belum dibuka sebagai administrator.
+3. **Salin ke server.** Di cPanel > File Manager, buka
+   `/DATA/k1807225/config/sidik-jari-classync.php`, lalu tempel blok empat
+   baris itu di dalam `$sj_perangkat = [ ... ];`. Simpan.
+4. **Cocokkan sidiknya.** Di panel admin, buka Laporan > Kiosk Sidik Jari.
+   Perangkat itu harus tampil berstatus "aktif", dan kolom "Sidik kunci"-nya
+   harus sama dengan baris "Sidik kunci" dari langkah 2. Kalau halaman
+   menampilkan peringatan "bukan 64 karakter hex", kuncinya terpotong saat
+   disalin: ulangi langkah 3.
+5. **Uji rantainya.** Dengan pembaca tercolok, buka halaman yang sama di
+   Chrome PC kiosk, lalu klik "Uji rantai". Semua barisnya harus hijau, sampai
+   "Server menerima detak". Baris tanda tangan merah berarti jembatan tidak
+   melihat pembacanya. Muat ulang halaman: perangkat itu kini "hidup".
+   Sesudahnya, keluar dari panel admin di PC kiosk.
+6. **Bersihkan.** Jalankan `cls` di PowerShell, lalu tutup jendelanya. Kalau
+   keluaran langkah 2 sempat disimpan ke berkas, hapus berkas itu.
+7. **Akun standar dan start otomatis.** Kerjakan fase C langkah 2 sampai 4 di
+   bawah. Pada uji 5 Oktober 2026 langkah itu belum terbukti.
+8. **Setelan daya.** Di Settings > System > Power & sleep, setel "Screen" dan
+   "Sleep" untuk keadaan tercolok ke "Never". Pada uji 5 Oktober pembaca
+   hilang dari ADC beberapa menit setelah PC ditinggal, lalu muncul lagi saat
+   PC dipakai, sedangkan Windows tetap melaporkan alatnya terpasang. Layar
+   yang mati adalah dugaan terkuatnya; uji terkendalinya belum dilakukan.
+   Setelan ini wajib sebelum 4.4.
+
+Kunci HMAC itu rahasia, setara password kiosk: jangan difoto, dikirim lewat
+pesan, atau disimpan di Git. Sidik kunci, yang delapan karakter, bukan
+rahasia.
+
+Sebagai layanan, jembatan hanya membuka `/status` dan `/detak`. Alamat
+`http://127.0.0.1:47890/` menampilkan halaman ringkas, bukan halaman uji.
+
+Sejak kiosk dipasangkan, `hapus-layanan.ps1 -HapusData` ikut menghapus kunci
+yang dikenal server. Sesudah itu kiosk harus dipasangkan ulang, dan semua jari
+didaftarkan ulang. Tanpa `-HapusData`, kunci dan templat tetap ada.
+
+Mencabut atau mengganti pasangan:
+
+- **Mencabut kiosk:** hapus entrinya dari `$sj_perangkat`, atau ubah `'aktif'`
+  menjadi `false`. Berlaku seketika, tanpa deploy.
+- **Kunci jembatan berganti**, karena folder data terhapus atau PC kiosk
+  diganti: ulangi langkah 2 sampai 5. ID perangkatnya ikut berganti, jadi
+  entri lama dihapus.
+
+## Uji prototipe di PC kiosk (4.1)
+
+Prosedur ini sudah dijalankan pada 3 dan 5 Oktober 2026; hasilnya ada di
+"Kriteria lanjut ke 4.2". Simpan untuk mengulang pengukuran.
 
 Kerjakan di luar jam kiosk (hari Minggu, atau setelah siswa pulang), karena
 ada restart. Sisihkan sekitar 3 jam. Pakai akun admin. Siapkan 3–4 relawan
 dewasa yang sudah menandatangani persetujuan uji coba; tidak ada siswa yang
 ikut.
 
+Halaman uji hanya ada kalau jembatan dijalankan di jendela konsol. Kalau
+layanannya sudah terpasang, hentikan dulu dari PowerShell admin, lalu nyalakan
+lagi setelah jendela konsol ditutup:
+
+```powershell
+sc.exe stop JembatanSidikJari
+sc.exe start JembatanSidikJari
+```
+
+Tulis `sc.exe`, bukan `sc`. Di PowerShell, `sc` adalah nama lain
+`Set-Content`: `sc stop JembatanSidikJari` tidak menghentikan apa pun dan
+malah membuat berkas bernama `stop` di folder kerja. Jembatan di jendela
+konsol memakai folder data yang sama dengan layanan, jadi kunci dan galerinya
+sama.
+
 Pembaca sekolah sudah diuji dengan dua driver, dan hasilnya berbeda. Yang
 menentukan ukuran dan DPI gambar adalah driver, bukan pembacanya:
 
 | | Driver DigitalPersona | Driver WBF |
 |---|---|---|
-| Dipakai di | komputer lain (uji 1 dan 3 Oktober 2026) | PC kiosk (uji 3 Oktober 2026) |
+| Dipakai di | komputer lain (uji 1 dan 3 Oktober 2026) | PC kiosk (uji 3 dan 5 Oktober 2026) |
 | Sampel Raw | 500 × 550, 700 DPI, 12 byte ekor bernilai nol | 320 × 360, 508 DPI, tanpa ekor |
 | Pembaca menurut ADC | Optical, UID tetap | Unknown, UID berganti tiap alat dicolok |
 | Kalibrasi 3 Oktober | 700 terbaik (jarak 42,2) | 508 jaraknya 129, setara dengan yang terbaik (512: 136,8); 700 jaraknya −8,9 |
+| Kalibrasi 5 Oktober, median − p99 | belum diuji | 508 terbaik (126,0); 700: 33,7; 800: −3,8 |
 
 PC kiosk memakai driver WBF yang dipasang Windows sendiri, dan pembacanya
 langsung tampil di ADC. Uji di komputer lain cukup untuk mencoba alur halaman,
@@ -100,12 +214,19 @@ tetapi kriteria lanjut ke 4.2 dinilai di PC kiosk. Mengganti driver mengubah
 ukuran dan DPI gambar, jadi semua jari harus didaftarkan ulang.
 
 Di PC kiosk penangkapan sesekali berhenti sendiri, lalu halaman memulainya
-lagi. Pada uji 3 Oktober itu terjadi di sela tangkapan layar, bukan karena
-tempelan: 59 tempelan berturut-turut lewat tanpa satu pun mulai ulang. Dugaan
-terkuatnya jendela Chrome yang tidak aktif, karena WebSDK hanya melayani
-jendela yang sedang aktif. Sejak 0.1.4 laporan mencatat setiap mulai ulang
-beserta keadaan jendelanya, supaya dugaan itu bisa dipastikan. Dengan driver
-DigitalPersona hal ini belum diamati.
+lagi. Sebabnya jendela Chrome yang sempat tidak aktif: WebSDK hanya melayani
+jendela yang sedang aktif. Uji 5 Oktober memastikannya. Kedua belas mulai
+ulang hari itu terjadi 0,12–0,25 detik setelah jendela kembali aktif, setiap
+tangkapan layar diikuti satu mulai ulang, dan 259 tempelan identifikasi lewat
+tanpa satu pun. Dengan driver DigitalPersona hal ini belum diamati.
+
+Pembaca juga bisa hilang dari ADC selagi PC ditinggal. Pada uji 5 Oktober itu
+terjadi dua kali, 4–5 menit setelah kegiatan terakhir, dan pembacanya muncul
+lagi saat PC dipakai. Selama itu detak tetap melaporkan alat terpasang, karena
+jembatan memeriksa alat lewat Windows, bukan lewat ADC. Layar yang mati karena
+hemat daya adalah dugaan terkuatnya, dan uji terkendalinya belum dilakukan.
+Untuk 4.4: layar kiosk tidak boleh mati, dan detak harus ikut memuat keadaan
+pembaca menurut ADC.
 
 ### Fase A: driver, ADC, dan jembatan di jendela konsol
 
@@ -190,11 +311,19 @@ menempelkan jari.
    Kalau muncul peringatan merah "DPI alat …, tetapi DPI galeri …", galeri itu
    dibuat dengan driver atau versi lain. Hapus semua data uji, lalu daftar
    ulang.
-3. **Kalibrasi & ukur.** "Hitung kalibrasi". Halaman memilih DPI sendiri dan
-   menolak DPI yang jaraknya ≤ 0. Kalau catatan kejadian berbunyi "tidak perlu
-   diganti", biarkan. Kalau berbunyi "sebaiknya diganti", klik "Terapkan DPI"
-   dua kali. Kerjakan sebelum jembatan dimulai ulang: gambar pendaftaran hanya
-   ada di memori.
+3. **Kalibrasi & ukur.** "Hitung kalibrasi". Halaman menilai tiap DPI dari
+   kolom "Median − p99", yaitu median skor jari yang sama dikurangi p99 skor
+   jari yang berbeda, lalu memilih DPI sendiri. Kalau catatan kejadian
+   berbunyi "tidak perlu diganti", biarkan. Kalau berbunyi "sebaiknya
+   diganti", klik "Terapkan DPI" dua kali. Kalau berbunyi "tidak menyarankan
+   DPI apa pun", jangan terapkan apa pun; periksa mutu tempelan pendaftaran.
+   DPI yang nilainya 0 atau kurang tidak bisa diterapkan. Kerjakan sebelum
+   jembatan dimulai ulang: gambar pendaftaran hanya ada di memori.
+
+   Kolom "Jarak" (skor sama-jari terendah dikurangi skor beda-jari tertinggi)
+   tidak dipakai untuk memilih. Ia ditentukan dua pasangan paling ekstrem
+   saja, jadi satu tempelan yang buruk cukup untuk membuatnya negatif: pada
+   uji 5 Oktober, dengan 36 jari, jaraknya negatif di semua DPI.
 4. **Identifikasi.** Klik "Mulai urutan", lalu ikuti tulisan "Sekarang: …".
    Urutannya berputar: setiap relawan melewati semua jarinya lima putaran,
    satu tempelan per jari per putaran. Kalau halaman meminta "ulangi jari yang
@@ -209,8 +338,8 @@ menempelkan jari.
    sebelumnya". Pada uji 3 Oktober di PC kiosk dengan galeri yang masih
    700 DPI, tempelan kelima dan seterusnya pada jari yang sama selalu gagal,
    dan sebabnya belum diketahui. Dengan galeri 508 DPI langkah ini belum
-   pernah dijalankan; rekamannya yang akan menunjukkan apakah gejala itu
-   masih ada.
+   pernah dijalankan, termasuk pada uji 5 Oktober, dan tidak lagi menjadi
+   syarat. Jalankan hanya kalau gejala itu muncul lagi.
 6. **Kalibrasi & ukur.** "Ukur waktu 1:N", sebaiknya setelah beberapa
    identifikasi. Angkanya hanya berlaku untuk komputer tempat uji berjalan.
 7. **Identifikasi.** "Kirim ulang sampel terakhir": harus ditolak (409).
@@ -231,12 +360,20 @@ menempelkan jari.
 
 2. Kalau PC belum punya akun standar (bukan admin), buat akun lokal
    `uji-kiosk`.
-3. Restart, masuk sebagai `uji-kiosk`, buka `http://127.0.0.1:47890/`. Harus
-   langsung menjawab (bukti start otomatis), identifikasi relawan R1 harus
-   berhasil (bukti templat bertahan), dan penangkapan jari harus jalan.
-4. Masih sebagai `uji-kiosk`, ketiga hal ini harus **ditolak**: membuka
-   `C:\ProgramData\JembatanSidikJari`, menjalankan `sc stop JembatanSidikJari`,
-   dan menghapus `.exe` di `C:\Program Files\JembatanSidikJari`.
+3. Restart, masuk sebagai `uji-kiosk`, buka `http://127.0.0.1:47890/`. Halaman
+   ringkas "Jembatan sidik jari berjalan" harus langsung tampil: itu bukti
+   start otomatis. Buka tautan `/status` di halaman itu: "mode" harus
+   `layanan`, dan ID perangkat serta angka galerinya harus sama dengan sebelum
+   restart, bukti kunci dan templat bertahan. Layanan tidak menyajikan halaman
+   uji, jadi penangkapan dan identifikasi dari akun standar baru diuji di 4.4,
+   lewat halaman kiosk.
+4. Masih sebagai `uji-kiosk`, dari PowerShell biasa, ketiga hal ini harus
+   **ditolak**: membuka `C:\ProgramData\JembatanSidikJari`, menjalankan
+   `sc.exe stop JembatanSidikJari`, dan menghapus `.exe` di
+   `C:\Program Files\JembatanSidikJari`. Jalankan `whoami` dulu untuk
+   memastikan jendelanya memang milik `uji-kiosk`. Pada uji 5 Oktober langkah
+   ini belum terbukti: jendelanya ternyata sesi admin, dan README waktu itu
+   menulis `sc stop`.
 5. **Uji dari halaman kiosk sungguhan**, tanpa deploy apa pun. Buka
    `https://smkt.alhasan.co.id/classync/absen-siswa.php` (jangan mengabsen
    siapa pun), tekan F12, buka Console, lalu jalankan satu per satu. Kalau
@@ -278,15 +415,17 @@ menempelkan jari.
    konsol ke layanan.
 2. "Hapus semua data uji" (klik dua kali), lalu "Kosongkan laporan" (klik dua
    kali).
-3. Dari PowerShell admin di folder paket:
+3. Kalau kiosk belum dipasangkan dengan server dan layanannya tidak dipakai
+   lagi, cabut dari PowerShell admin di folder paket:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\hapus-layanan.ps1 -HapusData
    ```
 
-   Ketik `HAPUS` saat diminta.
+   Ketik `HAPUS` saat diminta. Kalau kiosk sudah dipasangkan, lewati langkah
+   ini: `-HapusData` menghapus kunci yang dikenal server.
 4. Yang dibiarkan terpasang: driver, ADC, kebijakan driver, dan kebijakan
-   Chrome. Semuanya dipakai lagi di 4.2.
+   Chrome.
 5. Kembalikan kiosk seperti biasa, lalu pastikan absen QR/NISN tetap jalan.
 
 ### Kriteria lanjut ke 4.2
@@ -297,19 +436,49 @@ menempelkan jari.
 - Orang dikenali pada tempelan pertama ≥ 90%, dan dalam tiga tempelan ≥ 99%.
 - Ujung ke ujung di PC kiosk ≤ 1 detik pada galeri 500 templat.
 
-Keadaan per 3 Oktober 2026, dari dua uji di PC kiosk dengan driver WBF: paket
-0.1.2 dengan galeri 700 DPI, lalu paket 0.1.3 dengan galeri 508 DPI.
+Keadaan per 5 Oktober 2026, dari uji paket 0.1.4 di PC kiosk: enam relawan
+dewasa, 36 jari terdaftar, driver WBF, galeri 508 DPI.
 
-- Waktu terpenuhi: pada 508 DPI, galeri 500 templat butuh median 34 ms (p95
-  54 ms) dan ekstraksi 38 ms, di Windows 10 build 19045 dengan 4 prosesor.
-- Salah orang 0 dan jari tidak terdaftar yang diterima 0, pada 131 tempelan
-  dari kedua uji. Dua puluh di antaranya jari tidak terdaftar, dan semuanya
-  ditolak.
-- Tingkat pengenalan baru terukur untuk satu relawan. Pada 508 DPI, R1
-  dikenali pada tempelan pertama di 30 dari 30 percobaan, dengan skor 93–326
-  dan kandidat kedua tertinggi 27. R2 dan R3 belum diuji pada 508 DPI.
-- Belum dijalankan: langkah "satu jari 8 kali", detak otomatis 30 menit, dan
-  sisa fase C.
+| Kriteria | Hasil | Keadaan |
+|---|---|---|
+| Salah orang 0 | 0 dari 229 tempelan jari terdaftar | terpenuhi |
+| Jari tidak terdaftar yang diterima 0 | 0 dari 30; skor terbaiknya 9,3–23,1 | terpenuhi |
+| Dikenali pada tempelan pertama ≥ 90% | 149 dari 180 percobaan, 82,8% | belum |
+| Dikenali dalam tiga tempelan ≥ 99% | 169 dari 180 percobaan, 93,9% | belum |
+| ≤ 1 detik pada galeri 500 templat | median 46 ms, p95 67 ms | terpenuhi |
+
+Digabung dengan dua uji 3 Oktober, tidak ada salah orang pada 390 tempelan,
+dan tidak ada jari tidak terdaftar yang diterima pada 50 tempelan.
+
+Kriteria pengenalan belum terpenuhi, dan kekurangannya terpusat pada tiga
+relawan:
+
+- Dari 30 percobaan per relawan, tempelan pertama dikenali 30 kali untuk R1,
+  R4, dan R5; 25 kali untuk R6; dan 17 kali untuk R2 dan R3.
+- Mutu pendaftaran meramalkan hasilnya. Untuk jari yang keserasian tempelan
+  pendaftarannya paling rendah 150 atau lebih, 80 dari 80 percobaan dikenali
+  pada tempelan pertama. Untuk yang di bawah 60, hanya 10 dari 25.
+- Menurut posisi jari, telunjuk kanan terbaik (93%) dan jari manis kiri
+  terburuk (70%).
+- Penyebabnya bukan ambang: dari 60 tempelan yang ditolak, 49 skornya di
+  bawah 40.
+
+Diputuskan lanjut ke 4.2, dengan syarat yang dibawa ke langkah berikutnya:
+
+- **4.3, pendaftaran:** gerbang mutu saat mendaftar, dua jari terbaik per
+  orang, jari manis dihindari, dan aturan keserasian yang lebih ketat. Aturan
+  sekarang meloloskan empat tempelan yang hanya cocok berpasangan dua-dua.
+  Dihitung mundur dari data yang sama, gerbang keserasian 80 memberi 92,6%
+  pada tempelan pertama dan 100% dalam tiga, dan dua jari terbaik per orang
+  memberi 90% dan 100%. Angka itu dari enam orang dewasa, bukan dari siswa.
+- **4.4, kiosk:** layar tidak boleh mati, detak memuat keadaan pembaca
+  menurut ADC, dan tingkat pengenalan diukur ulang dengan siswa.
+
+Yang lain dari uji 5 Oktober: detak otomatis berhasil 65 kali berturut-turut
+selama sekitar satu jam, layanan terpasang dan galerinya bertahan, halaman
+kiosk bisa memanggil jembatan dan ADC tanpa permintaan izin setelah kebijakan
+Chrome terpasang, dan asal lain ditolak 403. Belum terbukti: start otomatis
+setelah restart, dan tiga pemeriksaan akun standar di fase C langkah 4.
 
 ## Titik mundur
 
@@ -317,6 +486,7 @@ Keadaan per 3 Oktober 2026, dari dua uji di PC kiosk dengan driver WBF: paket
 |---|---|
 | Driver dan ADC | Titik pemulihan "sebelum-sidik-jari"; atau hapus driver lewat Device Manager (centang "Delete the driver software") dan ADC lewat Apps & features. |
 | Layanan | `hapus-layanan.ps1`. Tanpa `-HapusData`, kunci dan templat dibiarkan. |
+| Pasangan dengan server | Hapus entri kiosk dari `$sj_perangkat` di berkas konfigurasi server, atau ubah `'aktif'` menjadi `false`. |
 | Kebijakan Chrome/Edge | `cabut-kebijakan-chrome.reg`. |
 | Kebijakan driver | Kembalikan "Do not include drivers with Windows Updates" ke Not Configured. |
 | Akun `uji-kiosk` | Hapus di Settings > Accounts. |
@@ -331,21 +501,28 @@ Semua rute hanya di `127.0.0.1:47890`. Permintaan dengan Host selain
 ditolak sebelum diproses, permintaan tanpa Origin hanya boleh GET, POST wajib
 `application/json`, dan kiriman dibatasi 2 MB.
 
-| Rute | Asal yang boleh | Guna |
-|---|---|---|
-| `GET /` | halaman sendiri | Halaman uji. |
-| `GET /status` | halaman sendiri, kiosk | Versi, mode, ID perangkat, waktu PC, alat menurut WMI, ringkasan galeri. |
-| `POST /detak` | halaman sendiri, kiosk | Detak bertanda tangan dengan status alat. |
-| `GET /galeri` | halaman sendiri | Daftar identitas dan jari terdaftar, tanpa templat. |
-| `POST /daftar` | halaman sendiri | Pendaftaran uji: empat tempelan satu jari. |
-| `POST /identifikasi` | halaman sendiri | Identifikasi 1:N, hasil yang diterima ditandatangani. |
-| `POST /kalibrasi` | halaman sendiri | Skor per DPI, atau menerapkan DPI baru. |
-| `POST /ukur` | halaman sendiri | Waktu pencocokan untuk galeri 50–2000 templat. |
-| `POST /hapus-uji` | halaman sendiri | Menghapus templat, gambar di memori, dan catatan sampel. |
+| Rute | Asal yang boleh | Sebagai layanan | Guna |
+|---|---|---|---|
+| `GET /` | halaman sendiri | ada | Di jendela konsol: halaman uji. Sebagai layanan: halaman ringkas. |
+| `GET /status` | halaman sendiri, kiosk | ada | Versi, mode, ID perangkat, sidik kunci, waktu PC, alat menurut WMI, ringkasan galeri. |
+| `POST /detak` | halaman sendiri, kiosk | ada | Detak bertanda tangan dengan status alat. |
+| `GET /galeri` | halaman sendiri | tidak | Daftar identitas dan jari terdaftar, tanpa templat. |
+| `POST /daftar` | halaman sendiri | tidak | Pendaftaran uji: empat tempelan satu jari. |
+| `POST /identifikasi` | halaman sendiri | tidak | Identifikasi 1:N, hasil yang diterima ditandatangani. |
+| `POST /kalibrasi` | halaman sendiri | tidak | Skor per DPI, atau menerapkan DPI baru. |
+| `POST /ukur` | halaman sendiri | tidak | Waktu pencocokan untuk galeri 50–2000 templat. |
+| `POST /hapus-uji` | halaman sendiri | tidak | Menghapus templat, gambar di memori, dan catatan sampel. |
 
-"Kiosk" berarti `https://smkt.alhasan.co.id`. Tidak ada rute yang
-mengembalikan templat atau gambar, dan tidak ada rute yang menandatangani isi
-kiriman pemanggil. Jembatan tidak pernah menghubungi server sendiri.
+Layanan berjalan tanpa pengawasan di PC yang dipakai siswa, jadi hanya
+membuka yang dibutuhkan halaman kiosk. Rute yang tidak dibuka dijawab 404
+untuk GET tanpa Origin, dan 403 untuk permintaan lain.
+
+"Kiosk" berarti `https://smkt.alhasan.co.id`; hanya `--asal-kiosk` dalam mode
+pengembangan yang bisa menggantinya. Tidak ada rute yang mengembalikan templat,
+gambar, atau kunci, dan tidak ada rute yang menandatangani isi kiriman
+pemanggil. Jembatan tidak pernah menghubungi server sendiri: halaman yang
+membawa tantangan dari server ke jembatan, lalu membawa tanda tangannya
+kembali.
 
 ### Sampel
 
@@ -373,7 +550,9 @@ Di `C:\ProgramData\JembatanSidikJari` (di Mac: folder `--data`):
 - `kunci.bin`: ID perangkat, kunci HMAC, dan kunci templat. Di Windows
   dilindungi DPAPI LocalMachine; yang menjaganya dari akun kiosk adalah ACL
   folder. Kalau `kunci.bin` rusak, atau hilang padahal `templat.json` ada,
-  jembatan berhenti, bukan membuat kunci baru.
+  jembatan berhenti, bukan membuat kunci baru. Kunci HMAC hanya keluar lewat
+  `--pasangan`, yang hanya membaca dan tidak pernah membuat kunci. Kunci
+  templat tidak pernah keluar.
 - `templat.json`: templat terenkripsi AES-256-GCM, satu rekaman per tempelan,
   terikat pada `SJ1|templat|identitas|jari|urutan|versi`. Rekaman yang
   dipindah ke identitas lain gagal didekripsi. Kolom `versi` memuat versi
@@ -402,6 +581,7 @@ Vektor uji, untuk memastikan server menyusun pesan dan HMAC yang sama:
 | | Nilai |
 |---|---|
 | Kunci HMAC (hex) | `000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f` |
+| Sidik kunci | `630dcd29` |
 | Tantangan | `a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf` |
 | Pesan absen | `SJ1\|absen\|kiosk-uji\|<tantangan>\|siswa:123\|87` |
 | HMAC absen | `5143256d84f0681ff427ffdb4f43b170d7aef6defc4cf052d85bad90b758223f` |
@@ -412,12 +592,35 @@ Vektor uji, untuk memastikan server menyusun pesan dan HMAC yang sama:
 hash_hmac('sha256', $pesan, hex2bin('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f'));
 ```
 
+Sidik kunci adalah delapan karakter pertama SHA-256 atas byte kunci HMAC,
+bukan atas teks hex-nya. Jembatan menampilkannya di `/status` dan di keluaran
+`--pasangan`, dan server menampilkannya di panel admin. Dengan itu kedua
+salinan kunci bisa dicocokkan tanpa memperlihatkan kuncinya.
+
+### Detak ke server
+
+Sejak 4.2 server memeriksa tanda tangan detak:
+
+1. Halaman meminta tantangan ke `api/sj_tantangan.php`, untuk ID perangkat
+   yang dijawab `/status`.
+2. Halaman meneruskan tantangan itu ke `/detak`. Jembatan menandatanganinya
+   bersama status alat.
+3. Halaman mengirim hasilnya ke `api/sj_detak.php`. Server menyusun ulang
+   pesannya sendiri, mencocokkan HMAC-nya dengan kunci perangkat di
+   konfigurasinya, lalu mencatat satu baris detak.
+
+Tantangan berlaku 120 detik dan hanya bisa dipakai sekali. Sisi servernya ada
+di `includes/sidik_jari.php`. Tombol "Uji rantai" di panel admin menjalankan
+ketiga langkah itu sekali.
+
 ### Ambang
 
 Identifikasi diterima kalau skor terbaik ≥ 50 dan unggul ≥ 10 atas identitas
 kedua. Pendaftaran memakai ambang 1:1 SourceAFIS (40) untuk keserasian
-tempelan dan untuk mencari jari ganda. Angka 50 dan 10 adalah nilai awal
-prototipe; angka akhirnya dipilih dari laporan uji di PC kiosk.
+tempelan dan untuk mencari jari ganda. Angka 50 dan 10 semula nilai awal
+prototipe. Uji 5 Oktober dengan 36 jari mempertahankannya: skor tertinggi
+terhadap orang lain 45,8, dua kali, dan menurunkan ambang ke 40 hanya akan
+menolong 11 dari 60 tempelan yang ditolak.
 
 Kalibrasi 3 Oktober memberi jarak yang lebar di kedua driver. Di PC kiosk pada
 508 DPI, skor sama-jari terendah 151,6 dan beda-jari tertinggi 22,6. Dengan
@@ -425,6 +628,11 @@ driver DigitalPersona pada 700 DPI, angkanya 74,5 dan 32,3. Ambang jangan
 diturunkan ke 40: pada uji identifikasi di PC kiosk dengan galeri 700 DPI,
 telunjuk kiri pernah mendapat skor 41,3 terhadap telunjuk kanan orang yang
 sama.
+
+Jarak selebar itu hanya ada pada galeri kecil dengan tempelan yang baik. Pada
+5 Oktober, dengan 36 jari, skor sama-jari terendah 0: ada tempelan pendaftaran
+dari jari yang sama yang tidak cocok satu sama lain. Itu soal mutu pendaftaran,
+yang dibenahi di 4.3, bukan soal ambang.
 
 ## Mengubah halaman uji
 
@@ -451,19 +659,23 @@ tetap LF dan kedua berkas `.reg` tetap CRLF, di sistem operasi apa pun.
 
 ## Hanya untuk prototipe
 
-Harus dicabut atau diubah sebelum dipakai untuk siswa (4.2 sampai 4.4):
+Harus dicabut atau diubah sebelum dipakai untuk siswa (4.3 sampai 4.4):
 
 - Pendaftaran tanpa token dari server. Di 4.3 pendaftaran butuh token sekali
   pakai dari admin.
+- Aturan keserasian pendaftaran, yang masih meloloskan empat tempelan yang
+  hanya cocok berpasangan dua-dua. Diperketat di 4.3, bersama gerbang mutu.
 - Rute `/kalibrasi`, `/ukur`, `/hapus-uji`, dan `/galeri`, serta halaman uji
-  di `/` beserta pemilih berkas mode pengembangan.
-- Identitas `uji:` di `Brankas.cs`.
+  di `/` beserta pemilih berkas mode pengembangan. Sejak 0.2.0 semuanya hanya
+  ada di jendela konsol; layanan tidak membukanya.
+- Identitas `uji:` di `Brankas.cs`. Server sudah menolaknya.
+- Cek alat yang hanya lewat Windows. Di 4.4 detak ikut memuat keadaan pembaca
+  menurut ADC.
 - Probe identifikasi terakhir yang disimpan di memori untuk `/ukur`, dan
   `skor_probe_sebelumnya` di jawaban `/identifikasi`: kemiripan dengan
   tempelan sebelumnya, hanya untuk menyelidiki tempelan yang gagal.
 - Catatan laporan yang disimpan halaman uji di `localStorage` peramban,
   termasuk catatan kejadian dan riwayat mulai ulang penangkapan.
 - Format PNG; di produksi hanya Raw.
-- Ambang 50 dan selisih 10, diganti angka dari laporan uji.
+- Ambang 50 dan selisih 10, ditinjau lagi setelah diukur dengan siswa di 4.4.
 - Identifikasi dari halaman kiosk, yang baru dibuka di 4.4.
-- Pemasangan kunci HMAC di server (pairing), yang dikerjakan di 4.2.
