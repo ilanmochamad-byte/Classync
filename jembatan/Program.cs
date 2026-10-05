@@ -14,14 +14,25 @@
 // - POST wajib application/json, supaya kiriman lintas asal selalu melewati
 //   preflight;
 // - tidak ada rute yang mengembalikan templat atau gambar, dan tidak ada rute
-//   yang menandatangani isi kiriman pemanggil.
+//   yang menandatangani isi kiriman pemanggil;
+// - sebagai layanan, yang dibuka hanya /status dan /detak. Halaman uji dan
+//   rute prototipe 4.1 hanya ada kalau jembatan dijalankan di jendela konsol.
 //
 // Argumen. Untuk layanan Windows argumen ditulis di binPath, yang hanya bisa
 // diubah admin:
 //   --port <n>       bawaan 47890
 //   --data <folder>  bawaan %ProgramData%\JembatanSidikJari
+//   --pasangan       menampilkan ID perangkat dan kunci HMAC untuk disalin ke
+//                    konfigurasi server, lalu keluar tanpa menyalakan server.
+//                    Hanya di jendela konsol; ditolak sebagai layanan.
 //   --pengembangan   uji di luar PC kiosk (Mac). Ditolak kalau berjalan
 //                    sebagai layanan, dan wajib di luar Windows.
+// Dua argumen berikut hanya diterima bersama --pengembangan, jadi tidak bisa
+// sampai ke layanan di PC kiosk:
+//   --asal-kiosk <asal>  asal halaman kiosk pengganti, untuk menguji rantainya
+//                        dengan server lokal. Hanya http://127.0.0.1:<port>
+//                        atau http://localhost:<port>.
+//   --rute-layanan       hanya membuka rute yang ada dalam mode layanan.
 
 using System.Globalization;
 using System.Management;
@@ -50,6 +61,14 @@ const string HalamanSementara = """
     <body><p>Jembatan sidik jari berjalan. Halaman uji belum dipasang.</p></body></html>
     """;
 
+// Yang dijawab di / kalau hanya rute layanan yang dibuka.
+const string HalamanLayanan = """
+    <!doctype html>
+    <html lang="id"><head><meta charset="utf-8"><title>Jembatan sidik jari</title></head>
+    <body><p>Jembatan sidik jari berjalan. Keadaannya ada di <a href="/status">/status</a>.</p>
+    <p>Halaman uji hanya tersedia kalau jembatan dijalankan di jendela konsol.</p></body></html>
+    """;
+
 Argumen arg;
 try
 {
@@ -75,10 +94,22 @@ if (!arg.Pengembangan && !OperatingSystem.IsWindows())
     Console.Error.WriteLine("Di luar Windows, jembatan hanya berjalan dengan --pengembangan.");
     return 2;
 }
+if (arg.Pasangan && sebagaiLayanan)
+{
+    // Kuncinya akan tercetak ke tempat yang tidak dilihat siapa pun, dan
+    // layanannya tidak pernah menyala.
+    Console.Error.WriteLine("--pasangan hanya untuk jendela konsol, bukan untuk layanan.");
+    return 2;
+}
 
 var folderData = arg.Data ?? (OperatingSystem.IsWindows()
     ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), NamaLayanan)
     : Path.Combine(Path.GetTempPath(), "jembatan-sidik-jari-pengembangan"));
+
+if (arg.Pasangan)
+{
+    return TampilkanPasangan(folderData);
+}
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -157,6 +188,10 @@ catch (Exception e) when (e is JsonException or IOException or UnauthorizedAcces
 
 var versi = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
 var mode = sebagaiLayanan ? "layanan" : arg.Pengembangan ? "pengembangan" : "konsol";
+// Layanan berjalan tanpa pengawasan di PC yang dipakai siswa, jadi hanya
+// melayani yang dibutuhkan halaman kiosk.
+var hanyaRuteLayanan = sebagaiLayanan || arg.RuteLayanan;
+var asalKiosk = arg.AsalKiosk ?? PenjagaAsal.AsalKiosk;
 var cekAlat = new CekAlat(log);
 var rute = new PetaRute(app);
 
@@ -175,7 +210,7 @@ app.Use(async (ctx, lanjut) =>
     h["Referrer-Policy"] = "no-referrer";
     h.Vary = "Origin";
 
-    var jawaban = PenjagaAsal.Periksa(ctx, arg.Port, rute);
+    var jawaban = PenjagaAsal.Periksa(ctx, arg.Port, rute, asalKiosk);
     if (jawaban is null)
     {
         await lanjut(ctx);
@@ -192,6 +227,10 @@ app.Use(async (ctx, lanjut) =>
 
 rute.Get("/", Asal.HalamanSendiri, () =>
 {
+    if (hanyaRuteLayanan)
+    {
+        return Results.Content(HalamanLayanan, "text/html; charset=utf-8");
+    }
     var halaman = typeof(Program).Assembly.GetManifestResourceStream("halaman/uji.html");
     return halaman is null
         ? Results.Content(HalamanSementara, "text/html; charset=utf-8")
@@ -205,6 +244,8 @@ rute.Get("/status", Asal.HalamanSendiri | Asal.Kiosk, () => Results.Json(new
     versi,
     mode,
     perangkat = brankas.Perangkat,
+    // Untuk dicocokkan dengan sidik kunci perangkat ini di server.
+    sidik_kunci = brankas.SidikKunci,
     waktu = DateTimeOffset.Now.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
     alat = cekAlat.Periksa(),
     galeri = pencocok.Ringkasan(),
@@ -237,42 +278,85 @@ rute.Post("/detak", Asal.HalamanSendiri | Asal.Kiosk, async (HttpRequest permint
     });
 });
 
-// Rute prototipe 4.1, hanya dari halaman uji jembatan sendiri. Identifikasi
-// baru dibuka untuk halaman kiosk di 4.4.
-rute.Get("/galeri", Asal.HalamanSendiri, () => Results.Json(pencocok.IsiGaleri()));
-rute.Post("/identifikasi", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
+// Rute prototipe 4.1, hanya dari halaman uji jembatan sendiri dan hanya di
+// jendela konsol. Identifikasi baru dibuka untuk halaman kiosk di 4.4.
+if (!hanyaRuteLayanan)
 {
-    var (isi, galat) = await BacaJson<PermintaanIdentifikasi>(permintaan);
-    return galat ?? Kirim(pencocok.Identifikasi(isi!));
-});
-rute.Post("/daftar", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
-{
-    var (isi, galat) = await BacaJson<PermintaanDaftar>(permintaan);
-    return galat ?? Kirim(pencocok.Daftarkan(isi!));
-});
-rute.Post("/kalibrasi", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
-{
-    var (isi, galat) = await BacaJson<PermintaanKalibrasi>(permintaan);
-    return galat ?? Kirim(pencocok.Kalibrasi(isi!));
-});
-rute.Post("/ukur", Asal.HalamanSendiri, () => Kirim(pencocok.Ukur()));
-rute.Post("/hapus-uji", Asal.HalamanSendiri, () => Kirim(pencocok.HapusDataUji()));
+    rute.Get("/galeri", Asal.HalamanSendiri, () => Results.Json(pencocok.IsiGaleri()));
+    rute.Post("/identifikasi", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
+    {
+        var (isi, galat) = await BacaJson<PermintaanIdentifikasi>(permintaan);
+        return galat ?? Kirim(pencocok.Identifikasi(isi!));
+    });
+    rute.Post("/daftar", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
+    {
+        var (isi, galat) = await BacaJson<PermintaanDaftar>(permintaan);
+        return galat ?? Kirim(pencocok.Daftarkan(isi!));
+    });
+    rute.Post("/kalibrasi", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
+    {
+        var (isi, galat) = await BacaJson<PermintaanKalibrasi>(permintaan);
+        return galat ?? Kirim(pencocok.Kalibrasi(isi!));
+    });
+    rute.Post("/ukur", Asal.HalamanSendiri, () => Kirim(pencocok.Ukur()));
+    rute.Post("/hapus-uji", Asal.HalamanSendiri, () => Kirim(pencocok.HapusDataUji()));
+}
 
 app.MapFallback(() => Results.Json(new { status = "error", message = "Rute tidak dikenal." },
     statusCode: StatusCodes.Status404NotFound));
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {
-    log.LogInformation("Jembatan sidik jari {Versi}, perangkat {Perangkat}, berjalan sebagai {Mode} di http://127.0.0.1:{Port}. Folder data: {Folder}",
-        versi, brankas.Perangkat, mode, arg.Port, folderData);
+    log.LogInformation("Jembatan sidik jari {Versi}, perangkat {Perangkat} (sidik kunci {Sidik}), berjalan sebagai {Mode} di http://127.0.0.1:{Port}. Folder data: {Folder}",
+        versi, brankas.Perangkat, brankas.SidikKunci, mode, arg.Port, folderData);
     if (arg.Pengembangan)
     {
         log.LogWarning("MODE PENGEMBANGAN. Jangan dipakai di PC kiosk.");
+    }
+    if (arg.AsalKiosk is not null)
+    {
+        log.LogWarning("Asal halaman kiosk diganti menjadi {Asal}.", arg.AsalKiosk);
     }
 });
 
 await app.RunAsync();
 return 0;
+
+// Perintah --pasangan. Tidak menyalakan server dan tidak menulis apa pun.
+static int TampilkanPasangan(string folderData)
+{
+    Pasangan pasangan;
+    try
+    {
+        pasangan = Brankas.BacaPasangan(folderData);
+    }
+    catch (BrankasRusakException e)
+    {
+        Console.Error.WriteLine(e.Message);
+        return 1;
+    }
+    Console.WriteLine($"""
+        Pasangan kiosk untuk konfigurasi server (sidik-jari-classync.php)
+
+          ID perangkat : {pasangan.Perangkat}
+          Kunci HMAC   : {pasangan.KunciHmac}
+          Sidik kunci  : {pasangan.SidikKunci}
+          Kunci dibuat : {pasangan.Dibuat}
+
+        Isi untuk $sj_perangkat:
+
+            '{pasangan.Perangkat}' => [
+                'aktif' => true,
+                'kunci' => ['{pasangan.KunciHmac}'],
+            ],
+
+        Kunci HMAC itu rahasia: jangan difoto, dikirim lewat pesan, atau disimpan
+        di Git. Setelah disalin ke server, bersihkan layar ini.
+        Sidik kunci bukan rahasia. Cocokkan dengan kolom "Sidik kunci" di panel
+        admin, halaman Kiosk Sidik Jari.
+        """);
+    return 0;
+}
 
 static IResult Galat(int kode, string pesan) =>
     Results.Json(new { status = "error", message = pesan }, statusCode: kode);
@@ -317,8 +401,9 @@ static class PenjagaAsal
 {
     public const string AsalKiosk = "https://smkt.alhasan.co.id";
 
-    // null berarti permintaan boleh lanjut ke rutenya.
-    public static Jawaban? Periksa(HttpContext ctx, int port, PetaRute rute)
+    // null berarti permintaan boleh lanjut ke rutenya. asalKiosk selalu
+    // AsalKiosk, kecuali dalam mode pengembangan dengan --asal-kiosk.
+    public static Jawaban? Periksa(HttpContext ctx, int port, PetaRute rute, string asalKiosk)
     {
         var permintaan = ctx.Request;
 
@@ -333,7 +418,7 @@ static class PenjagaAsal
         var origin = permintaan.Headers.Origin.ToString();
         if (origin.Length > 0)
         {
-            var asal = JenisAsal(origin, port);
+            var asal = JenisAsal(origin, port, asalKiosk);
             if (aturan is null || (aturan.Value.Asal & asal) == 0)
             {
                 return new Jawaban(StatusCodes.Status403Forbidden, "Asal permintaan tidak diizinkan.");
@@ -374,16 +459,18 @@ static class PenjagaAsal
         return null;
     }
 
-    static Asal JenisAsal(string origin, int port)
+    // Halaman sendiri diperiksa lebih dulu, supaya --asal-kiosk yang kebetulan
+    // sama dengan alamat jembatan tidak mengubah halaman uji menjadi "kiosk".
+    static Asal JenisAsal(string origin, int port, string asalKiosk)
     {
-        if (origin.Equals(AsalKiosk, StringComparison.Ordinal))
-        {
-            return Asal.Kiosk;
-        }
         if (origin.Equals($"http://127.0.0.1:{port}", StringComparison.Ordinal)
             || origin.Equals($"http://localhost:{port}", StringComparison.OrdinalIgnoreCase))
         {
             return Asal.HalamanSendiri;
+        }
+        if (origin.Equals(asalKiosk, StringComparison.Ordinal))
+        {
+            return Asal.Kiosk;
         }
         return 0;
     }
@@ -497,7 +584,7 @@ sealed record StatusAlat(bool? Terhubung, int Jumlah, string Keterangan);
 
 sealed record PermintaanDetak(string? Tantangan);
 
-sealed record Argumen(int Port, string? Data, bool Pengembangan)
+sealed record Argumen(int Port, string? Data, bool Pengembangan, bool Pasangan, string? AsalKiosk, bool RuteLayanan)
 {
     public const int PortBawaan = 47890;
 
@@ -506,6 +593,9 @@ sealed record Argumen(int Port, string? Data, bool Pengembangan)
         var port = PortBawaan;
         string? data = null;
         var pengembangan = false;
+        var pasangan = false;
+        string? asalKiosk = null;
+        var ruteLayanan = false;
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -528,10 +618,35 @@ sealed record Argumen(int Port, string? Data, bool Pengembangan)
                 case "--pengembangan":
                     pengembangan = true;
                     break;
+                case "--pasangan":
+                    pasangan = true;
+                    break;
+                case "--asal-kiosk":
+                    if (++i >= args.Length || !AsalLokal(args[i]))
+                    {
+                        throw new ArgumentException("--asal-kiosk butuh asal lokal, misalnya http://127.0.0.1:8080.");
+                    }
+                    asalKiosk = args[i];
+                    break;
+                case "--rute-layanan":
+                    ruteLayanan = true;
+                    break;
                 default:
                     throw new ArgumentException("tidak dikenal: " + args[i]);
             }
         }
-        return new Argumen(port, data, pengembangan);
+        if (!pengembangan && (asalKiosk is not null || ruteLayanan))
+        {
+            throw new ArgumentException("--asal-kiosk dan --rute-layanan hanya boleh bersama --pengembangan.");
+        }
+        return new Argumen(port, data, pengembangan, pasangan, asalKiosk, ruteLayanan);
     }
+
+    // Persis bentuk header Origin dari halaman lokal: http, 127.0.0.1 atau
+    // localhost, port tertulis, tanpa jalur. Pembanding terakhir yang
+    // memastikan bentuknya, termasuk skema http.
+    static bool AsalLokal(string teks) =>
+        Uri.TryCreate(teks, UriKind.Absolute, out var uri)
+        && uri.Host is "127.0.0.1" or "localhost"
+        && teks == $"http://{uri.Host}:{uri.Port}";
 }
