@@ -17,7 +17,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>jembatan-sidik-jari</AssemblyName>
     <RootNamespace>JembatanSidikJari</RootNamespace>
-    <Version>0.1.4</Version>
+    <Version>0.2.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
