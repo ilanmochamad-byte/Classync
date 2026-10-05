@@ -60,6 +60,7 @@ require '../includes/db.php';
                 <li><a class="dropdown-item" href="status_harian.php">Status Harian Siswa</a></li>
                 <li><a class="dropdown-item" href="statistik_siswa.php">Statistik Siswa</a></li>
                 <li><a class="dropdown-item" href="pusat_layanan_bk.php">Pusat Layanan BK</a></li>
+                <li><a class="dropdown-item" href="kiosk_sidik_jari.php">Kiosk Sidik Jari</a></li>
             </ul>
         </li>
         <li class="nav-item dropdown">
