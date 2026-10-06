@@ -8,8 +8,8 @@
 //   --pasangan di PC kiosk, lalu menyalin ID dan kunci itu ke konfigurasi
 //   server. Itu satu-satunya jalan kunci ini keluar dari brankas;
 // - kunci templat, untuk mengenkripsi templat sidik jari. Kunci ini TIDAK
-//   PERNAH meninggalkan PC kiosk, jadi salinan templat di server tidak bisa
-//   dibuka di sana.
+//   PERNAH meninggalkan PC kiosk, dan templatnya juga tidak disalin ke
+//   server.
 //
 // Di Windows, kunci.bin dilindungi DPAPI LocalMachine, sehingga berkasnya
 // tidak berguna kalau disalin ke PC lain. Yang menjaganya dari akun kiosk
@@ -27,6 +27,12 @@
 // tidak bisa disusupkan:
 //   SJ1|absen|<perangkat>|<tantangan>|<identitas>|<skor>
 //   SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>
+//   SJ1|terdaftar|<perangkat>|<tantangan>|<identitas>|<jari>|<mutu>
+//   SJ1|dicabut|<perangkat>|<tantangan>|<identitas>|<jumlah>
+// Dua pesan lain hanya DIPERIKSA di sini, tidak pernah ditandatangani. Itu
+// izin dari server untuk mendaftarkan atau mencabut:
+//   SJ1|izin-daftar|<perangkat>|<tantangan jembatan>|<identitas>|<jari>
+//   SJ1|izin-cabut|<perangkat>|<tantangan jembatan>|<identitas>
 
 using System.Globalization;
 using System.Security.Cryptography;
@@ -171,6 +177,93 @@ sealed partial class Brankas
         Wajib(PolaTantangan(), tantangan, nameof(tantangan));
         return Tandatangani(string.Join('|', VersiPesan, "detak", Perangkat, tantangan,
                                         alatTerhubung ? "alat:1" : "alat:0"));
+    }
+
+    // ---------- Pendaftaran dan pencabutan berizin ----------
+    //
+    // Server dan jembatan memakai kunci HMAC yang sama, jadi jenis pesannya
+    // yang memisahkan. Jembatan hanya MEMERIKSA pesan izin-*, dan tidak pernah
+    // menandatanganinya. Karena itu izin yang cocok hanya bisa berasal dari
+    // server, yang baru memberikannya kepada admin yang sedang login.
+    //
+    // sesi adalah tantangan yang diterbitkan jembatan sendiri dan hanya
+    // berlaku sekali, jadi izin tidak bisa dipakai ulang dan tidak bergantung
+    // pada jam PC kiosk.
+
+    // Server mengirim satu tanda tangan per kunci yang terdaftar untuk
+    // perangkat ini. Lebih dari ini bukan kiriman server.
+    public const int MaksIzin = 8;
+
+    // siswa:<id> atau guru:<id>. Identitas uji: tidak pernah boleh didaftarkan
+    // lewat jalur berizin.
+    public static bool IdentitasResmi(string? identitas) => Cocok(PolaIdentitasResmi(), identitas);
+
+    public static bool IdentitasUji(string? identitas) =>
+        Cocok(PolaIdentitas(), identitas) && !Cocok(PolaIdentitasResmi(), identitas);
+
+    public bool IzinDaftarSah(string sesi, string identitas, string jari, IReadOnlyList<string?>? izin)
+    {
+        Wajib(PolaTantangan(), sesi, nameof(sesi));
+        Wajib(PolaIdentitasResmi(), identitas, nameof(identitas));
+        Wajib(PolaJari(), jari, nameof(jari));
+        return IzinCocok(string.Join('|', VersiPesan, "izin-daftar", Perangkat, sesi, identitas, jari), izin);
+    }
+
+    public bool IzinCabutSah(string sesi, string identitas, IReadOnlyList<string?>? izin)
+    {
+        Wajib(PolaTantangan(), sesi, nameof(sesi));
+        Wajib(PolaIdentitasResmi(), identitas, nameof(identitas));
+        return IzinCocok(string.Join('|', VersiPesan, "izin-cabut", Perangkat, sesi, identitas), izin);
+    }
+
+    // Tanda terima untuk server: jari itu sudah tersimpan. mutu adalah
+    // keserasian terendah keempat tempelannya.
+    public TandaTangan TandatanganiTerdaftar(string tantangan, string identitas, string jari, int mutu)
+    {
+        Wajib(PolaTantangan(), tantangan, nameof(tantangan));
+        Wajib(PolaIdentitasResmi(), identitas, nameof(identitas));
+        Wajib(PolaJari(), jari, nameof(jari));
+        if (mutu is < 0 or > 9999)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mutu), "Mutu harus 0 sampai 9999.");
+        }
+        return Tandatangani(string.Join('|', VersiPesan, "terdaftar", Perangkat, tantangan, identitas, jari,
+                                        mutu.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    // Tanda terima untuk server: templat orang itu sudah dihapus. jumlah 0
+    // berarti memang sudah tidak ada.
+    public TandaTangan TandatanganiDicabut(string tantangan, string identitas, int jumlah)
+    {
+        Wajib(PolaTantangan(), tantangan, nameof(tantangan));
+        Wajib(PolaIdentitasResmi(), identitas, nameof(identitas));
+        if (jumlah is < 0 or > 99)
+        {
+            throw new ArgumentOutOfRangeException(nameof(jumlah), "Jumlah harus 0 sampai 99.");
+        }
+        return Tandatangani(string.Join('|', VersiPesan, "dicabut", Perangkat, tantangan, identitas,
+                                        jumlah.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    // Selama rotasi kunci, server belum tahu kunci mana yang dipegang
+    // jembatan, jadi semua kandidat diperiksa. Pembandingannya berwaktu tetap.
+    bool IzinCocok(string pesan, IReadOnlyList<string?>? izin)
+    {
+        if (izin is null || izin.Count is 0 or > MaksIzin)
+        {
+            return false;
+        }
+        var harap = HMACSHA256.HashData(_kunciHmac, Encoding.ASCII.GetBytes(pesan));
+        var cocok = false;
+        foreach (var kandidat in izin)
+        {
+            // Bentuk tanda tangan sama dengan tantangan: 64 hex huruf kecil.
+            if (Cocok(PolaTantangan(), kandidat))
+            {
+                cocok |= CryptographicOperations.FixedTimeEquals(harap, Convert.FromHexString(kandidat!));
+            }
+        }
+        return cocok;
     }
 
     public RekamanTemplat Enkripsi(Templat templat)
@@ -340,6 +433,9 @@ sealed partial class Brankas
     [GeneratedRegex(@"\A(?:(?:siswa|guru):[1-9][0-9]{0,9}|uji:[A-Z0-9-]{1,16})\z")]
     private static partial Regex PolaIdentitas();
 
+    [GeneratedRegex(@"\A(?:siswa|guru):[1-9][0-9]{0,9}\z")]
+    private static partial Regex PolaIdentitasResmi();
+
     [GeneratedRegex(@"\A[a-z0-9-]{1,24}\z")]
     private static partial Regex PolaJari();
 
@@ -350,9 +446,8 @@ sealed partial class Brankas
 // Templat dalam bentuk terbuka. Hanya ada di memori jembatan.
 sealed record Templat(string Identitas, string Jari, int Urutan, string Versi, byte[] Data);
 
-// Templat terenkripsi. Bentuk inilah yang disimpan di templat.json, dan mulai
-// 4.2 juga di server. Nonce dan Sandi dalam base64; Sandi berisi teks sandi
-// diikuti tag GCM 16 byte.
+// Templat terenkripsi. Bentuk inilah yang disimpan di templat.json. Nonce dan
+// Sandi dalam base64; Sandi berisi teks sandi diikuti tag GCM 16 byte.
 sealed record RekamanTemplat(string Identitas, string Jari, int Urutan, string Versi, string Nonce, string Sandi);
 
 sealed record TandaTangan(string Pesan, string Hmac);
