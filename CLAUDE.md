@@ -380,7 +380,8 @@ Pekerjaan sidik jarinya sendiri dibagi lima sub-langkah, dan nomornya dipakai
 di README jembatan dan di kode: 4.1 prototipe jembatan, 4.2 fondasi server,
 4.3 pendaftaran jari, 4.4 kiosk berdampingan dengan QR/NISN, dan 4.5
 peralihan. Yang sudah ada di repo adalah 4.1 (PR #18–#22) dan 4.2: sisi
-server di PR #23, jembatan 0.2.0 di PR #24, lalu detak dari halaman kiosk.
+server di PR #23, jembatan 0.2.0 di PR #24, dan detak dari halaman kiosk di
+PR #25.
 
 **Absen lewat sidik jari belum dibuka.** Alur QR/NISN di `absen-siswa.php`
 dan `api/proses_absen_siswa.php` tidak berubah. Yang ada baru detak: bukti
@@ -489,12 +490,12 @@ jembatan, dan kunci yang sama di kedua sisi.
   permintaan izin jaringan lokal. Skripnya baru menyentuh `127.0.0.1` kalau
   salah satu ini benar:
   - izin `loopback-network` untuk situs ini berstatus `granted`. Di PC kiosk
-    izin itu diharapkan datang dari kebijakan Chrome,
-    `jembatan/kebijakan-chrome.reg`;
+    izin itu datang dari kebijakan Chrome, `jembatan/kebijakan-chrome.reg`;
   - peramban itu ditandai sebagai kiosk. `absen-siswa.php?detak=hidup`
     memasang tandanya, dan `?detak=mati` mencabutnya. Tandanya tersimpan di
     `localStorage`, jadi berlaku per profil Chrome dan ikut hilang kalau data
-    situs dihapus.
+    situs dihapus. Penanda ini hanya untuk peramban tanpa kebijakan itu; PC
+    kiosk tidak memerlukannya.
 - **Jadwalnya juga disimpan di `localStorage`.** Halaman kiosk memuat ulang
   dirinya 2 detik setelah tiap scan berhasil. Pewaktu biasa akan terulang
   dari nol pada jam sibuk, dan kiosk tampak diam justru saat paling ramai.
@@ -509,7 +510,9 @@ Jari).
   selama halaman kiosk terbuka di Chrome PC kiosk. PC yang mati dan halaman
   kiosk yang tertutup sama-sama terbaca "diam".
 - **Ringkasan 7 hari per perangkat:** detak pertama dan terakhir, jumlah
-  detak, jeda di atas 3 menit, dan detak tanpa alat.
+  detak, jeda di atas 3 menit, dan detak tanpa alat. Jeda dihitung di antara
+  dua detak pada hari yang sama. Jadi halaman kiosk yang ditutup lalu dibuka
+  lagi hari itu tampil sebagai jeda, sedangkan malam hari tidak.
 - **Tombol Uji rantai** menjalankan satu detak dari peramban yang membuka
   halaman itu. Jembatan hanya mendengar di `127.0.0.1`, jadi uji ini hanya
   berhasil di PC kiosk. Dari komputer lain ia gagal di baris pertama, dan itu
@@ -527,19 +530,26 @@ Kalau kiosk "diam" padahal halamannya terbuka, periksa berurutan:
    peramban itu belum melewati gerbangnya: buka
    `absen-siswa.php?detak=hidup` sekali.
 
-Belum teruji saat catatan ini ditulis, 6 Oktober 2026:
+Terverifikasi di produksi 6 Oktober 2026, di PC kiosk dengan jembatan 0.2.0:
 
-- **Seluruh 4.2 di produksi.** Ujinya baru di lokal: PHP 8.4, MariaDB 12.3,
-  dan jembatan mode pengembangan di Mac. Server memakai PHP 8.3 dan MariaDB
-  10.6. Yang harus diverifikasi di sana: kedua tabel, berkas konfigurasi,
-  pemasangan jembatan 0.2.0 di PC kiosk, Uji rantai, dan detak dari halaman
-  kiosk sepanjang jam sekolah.
-- **Apakah izin dari kebijakan Chrome terbaca `granted`.** Dokumentasi Chrome
-  tidak menyebutnya. Jalankan ini di konsol halaman kiosk; kalau jawabannya
-  bukan `granted`, kiosk memakai `?detak=hidup`:
+- halaman pantau menampilkan kiosknya "aktif" dan "hidup", alat terpasang,
+  tanpa peringatan konfigurasi;
+- Uji rantai lulus dengan semua baris hijau, dan detaknya tercatat;
+- layanan jembatan menyala sendiri setelah PC di-restart;
+- halaman kiosk berdetak sendiri semenit sekali, dan konsolnya menulis
+  `[detak kiosk] aktif lewat izin`;
+- izin dari kebijakan Chrome terbaca `granted`, di halaman kiosk maupun di
+  halaman pantau. Dokumentasi Chrome tidak menyebut hal ini. Memeriksanya
+  di konsol:
   `navigator.permissions.query({name: 'loopback-network'}).then(p => console.log(p.state), console.error)`
-- **Start otomatis layanan setelah restart, dan tiga pemeriksaan akun
-  standar.** Keduanya ada di fase C README jembatan.
+
+Belum teruji:
+
+- **Detak sepanjang jam sekolah,** termasuk jam sibuk dengan scan sungguhan.
+  Buktinya ada di ringkasan 7 hari mulai 7 Oktober 2026. Jeda selagi halaman
+  kiosk terbuka perlu diselidiki.
+- **Tiga pemeriksaan akun standar** di fase C README jembatan. Hasilnya
+  belum dilaporkan.
 
 Yang masih menunggu sesudah 4.2:
 
