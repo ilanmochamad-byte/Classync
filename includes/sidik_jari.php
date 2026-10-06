@@ -4,15 +4,30 @@
 // Jembatan (folder jembatan/, berjalan di PC kiosk) menandatangani hasilnya
 // dengan HMAC-SHA256 memakai kunci per perangkat. Berkas ini sisi servernya:
 // menyusun ulang pesan yang sama, mencocokkan tanda tangannya, dan memastikan
-// setiap tantangan hanya dipakai sekali. Pemakainya sekarang baru detak kiosk
-// (api/sj_tantangan.php dan api/sj_detak.php).
+// setiap tantangan hanya dipakai sekali. Pemakainya: detak kiosk
+// (api/sj_tantangan.php dan api/sj_detak.php) dan pendaftaran jari
+// (admin/sj_izin.php, admin/sj_catat.php, dan admin/sidik_jari.php).
 //
-// Pesan kanonik, sama persis dengan jembatan/Brankas.cs:
+// Pesan kanonik, sama persis dengan jembatan/Brankas.cs. Yang ditandatangani
+// jembatan dan diperiksa server:
 //   SJ1|absen|<perangkat>|<tantangan>|<identitas>|<skor>
 //   SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>
+//   SJ1|terdaftar|<perangkat>|<tantangan>|<identitas>|<jari>|<mutu>
+//   SJ1|dicabut|<perangkat>|<tantangan>|<identitas>|<jumlah>
+// Yang ditandatangani server dan diperiksa jembatan, dengan kunci perangkat
+// yang sama:
+//   SJ1|izin-daftar|<perangkat>|<tantangan jembatan>|<identitas>|<jari>
+//   SJ1|izin-cabut|<perangkat>|<tantangan jembatan>|<identitas>
 // Server selalu menyusun pesannya sendiri dari kolom yang sudah diperiksa
 // polanya. Pesan kiriman pemanggil tidak pernah dipakai, dan pemisah | tidak
 // bisa disusupkan.
+//
+// Kedua arah memakai kunci yang sama, jadi jenis pesannya yang memisahkan:
+// server hanya menandatangani izin-*, dan jembatan tidak pernah
+// menandatanganinya. Karena itu izin yang sah hanya bisa berasal dari server.
+// Tantangan di dalam izin diterbitkan jembatan dan hanya berlaku sekali di
+// sana, jadi izin tidak bisa dipakai ulang dan tidak bergantung pada jam PC
+// kiosk.
 //
 // Kunci ada di luar webroot, di SJ_BERKAS_KONFIGURASI:
 //   $sj_rahasia_tantangan = ['<64 hex>', ...];
@@ -42,6 +57,12 @@ if (!defined('SJ_VERSI_PESAN')) {
 if (!defined('SJ_UMUR_TANTANGAN')) {
     // Detik. Cukup untuk satu putaran halaman kiosk, jembatan, lalu server.
     define('SJ_UMUR_TANTANGAN', 120);
+}
+
+if (!defined('SJ_UMUR_IZIN')) {
+    // Detik. Tantangan untuk tanda terima pendaftaran dan pencabutan berumur
+    // lebih panjang: satu jari butuh empat tempelan, ditambah ulangannya.
+    define('SJ_UMUR_IZIN', 900);
 }
 
 if (!defined('SJ_SIMPAN_DETAK_HARI')) {
@@ -82,7 +103,36 @@ if (!function_exists('sjBentukIdentitas')) {
 
 if (!function_exists('sjBentukTujuan')) {
     function sjBentukTujuan($nilai) {
-        return $nilai === 'absen' || $nilai === 'detak';
+        return in_array($nilai, ['absen', 'detak', 'daftar', 'cabut'], true);
+    }
+}
+
+if (!function_exists('sjDaftarJari')) {
+    // Jari yang boleh didaftarkan, berurutan seperti ditawarkan halaman
+    // pendaftaran: kedua telunjuk dulu, jari tengah sebagai pengganti. Jari
+    // manis sengaja tidak ada: pada uji 5 Oktober 2026 pengenalannya terburuk.
+    function sjDaftarJari() {
+        return [
+            'telunjuk-kanan' => 'telunjuk kanan',
+            'telunjuk-kiri'  => 'telunjuk kiri',
+            'tengah-kanan'   => 'jari tengah kanan',
+            'tengah-kiri'    => 'jari tengah kiri',
+        ];
+    }
+}
+
+if (!function_exists('sjBentukJari')) {
+    function sjBentukJari($nilai) {
+        return is_string($nilai) && isset(sjDaftarJari()[$nilai]);
+    }
+}
+
+if (!function_exists('sjBentukBilangan')) {
+    // Bilangan bulat tanpa tanda dari 0 sampai $maks, sebagai integer. JSON
+    // "87" (teks) dan 87.0 (pecahan) ditolak, supaya pesan yang disusun server
+    // tidak bisa berbeda dari yang ditandatangani jembatan.
+    function sjBentukBilangan($nilai, $maks) {
+        return is_int($nilai) && $nilai >= 0 && $nilai <= $maks;
     }
 }
 
@@ -215,7 +265,7 @@ if (!function_exists('sjTantanganBaru')) {
 if (!function_exists('sjPeriksaTantangan')) {
     // Mengembalikan:
     //   'sah'          terbitan server ini untuk tujuan dan perangkat itu, dan
-    //                  belum lewat SJ_UMUR_TANTANGAN;
+    //                  belum lewat $umur detik;
     //   'bentuk'       bukan 64 karakter hex, atau tujuan/perangkat tidak sah;
     //   'asing'        bukan terbitan server ini, atau untuk tujuan atau
     //                  perangkat lain;
@@ -223,7 +273,7 @@ if (!function_exists('sjPeriksaTantangan')) {
     //
     // Belum memeriksa apakah tantangannya pernah dipakai; itu tugas
     // sjPakaiTantangan(), setelah tanda tangan perangkat terbukti sah.
-    function sjPeriksaTantangan($konfigurasi, $tantangan, $tujuan, $perangkat, $kini = null) {
+    function sjPeriksaTantangan($konfigurasi, $tantangan, $tujuan, $perangkat, $kini = null, $umur = SJ_UMUR_TANTANGAN) {
         if (!sjBentukTantangan($tantangan) || !sjBentukTujuan($tujuan) || !sjBentukPerangkat($perangkat)) {
             return 'bentuk';
         }
@@ -242,7 +292,7 @@ if (!function_exists('sjPeriksaTantangan')) {
         $usia = ($kini === null ? time() : (int)$kini) - $terbit;
         // Terbit dan periksa memakai jam server yang sama. Lima detik ke depan
         // ditoleransi untuk jam yang disetel mundur di antaranya.
-        return $usia >= -5 && $usia <= SJ_UMUR_TANTANGAN ? 'sah' : 'kedaluwarsa';
+        return $usia >= -5 && $usia <= (int)$umur ? 'sah' : 'kedaluwarsa';
     }
 }
 
@@ -272,7 +322,7 @@ if (!function_exists('sjPakaiTantangan')) {
             throw new RuntimeException('Tantangan tidak bisa dicatat (galat ' . $galat . ').');
         }
 
-        // Tantangan hanya berumur SJ_UMUR_TANTANGAN detik, jadi baris yang
+        // Tantangan berumur paling lama SJ_UMUR_IZIN detik, jadi baris yang
         // lebih tua dari sehari tidak lagi berguna.
         $batas = date('Y-m-d H:i:s', time() - 86400);
         $stmt = $conn->prepare("DELETE FROM tantangan_kiosk WHERE dipakai < ? LIMIT 200");
@@ -320,6 +370,74 @@ if (!function_exists('sjTandaTanganSah')) {
             }
         }
         return $sah;
+    }
+}
+
+if (!function_exists('sjPesanIzinDaftar')) {
+    // Izin server untuk mendaftarkan satu jari milik satu orang. $tantangan
+    // diterbitkan jembatan. null kalau ada kolom yang tidak sah.
+    function sjPesanIzinDaftar($perangkat, $tantangan, $identitas, $jari) {
+        if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || !sjBentukIdentitas($identitas)
+            || !sjBentukJari($jari)) {
+            return null;
+        }
+        return implode('|', [SJ_VERSI_PESAN, 'izin-daftar', $perangkat, $tantangan, $identitas, $jari]);
+    }
+}
+
+if (!function_exists('sjPesanIzinCabut')) {
+    // Izin server untuk menghapus semua templat satu orang dari jembatan.
+    // $tantangan diterbitkan jembatan. null kalau ada kolom yang tidak sah.
+    function sjPesanIzinCabut($perangkat, $tantangan, $identitas) {
+        if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || !sjBentukIdentitas($identitas)) {
+            return null;
+        }
+        return implode('|', [SJ_VERSI_PESAN, 'izin-cabut', $perangkat, $tantangan, $identitas]);
+    }
+}
+
+if (!function_exists('sjPesanTerdaftar')) {
+    // Tanda terima jembatan: jari itu sudah tersimpan. $tantangan terbitan
+    // server untuk tujuan daftar. $mutu adalah keserasian terendah keempat
+    // tempelannya, integer 0 sampai 9999. null kalau ada kolom yang tidak sah.
+    function sjPesanTerdaftar($perangkat, $tantangan, $identitas, $jari, $mutu) {
+        if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || !sjBentukIdentitas($identitas)
+            || !sjBentukJari($jari) || !sjBentukBilangan($mutu, 9999)) {
+            return null;
+        }
+        return implode('|', [SJ_VERSI_PESAN, 'terdaftar', $perangkat, $tantangan, $identitas, $jari, $mutu]);
+    }
+}
+
+if (!function_exists('sjPesanDicabut')) {
+    // Tanda terima jembatan: templat orang itu sudah dihapus. $tantangan
+    // terbitan server untuk tujuan cabut. $jumlah adalah banyaknya templat
+    // yang dihapus, integer 0 sampai 99; 0 berarti memang sudah tidak ada.
+    function sjPesanDicabut($perangkat, $tantangan, $identitas, $jumlah) {
+        if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || !sjBentukIdentitas($identitas)
+            || !sjBentukBilangan($jumlah, 99)) {
+            return null;
+        }
+        return implode('|', [SJ_VERSI_PESAN, 'dicabut', $perangkat, $tantangan, $identitas, $jumlah]);
+    }
+}
+
+if (!function_exists('sjTandaIzin')) {
+    // Tanda tangan server atas pesan izin, satu per kunci perangkat itu.
+    // Jembatan hanya punya satu kunci; selama rotasi server belum tahu yang
+    // mana, jadi semuanya dikirim dan jembatan mencari yang cocok.
+    //
+    // Hanya untuk pesan izin-*. Pesan lain ditolak, supaya fungsi ini tidak
+    // bisa dipakai menandatangani detak, absen, atau tanda terima.
+    function sjTandaIzin($entri, $pesan) {
+        if (!is_string($pesan) || preg_match('/\A' . SJ_VERSI_PESAN . '\|izin-(?:daftar|cabut)\|/', $pesan) !== 1) {
+            throw new InvalidArgumentException('Hanya pesan izin yang boleh ditandatangani server.');
+        }
+        $tanda = [];
+        foreach ($entri['kunci'] as $kunci) {
+            $tanda[] = hash_hmac('sha256', $pesan, $kunci);
+        }
+        return $tanda;
     }
 }
 
@@ -377,5 +495,147 @@ if (!function_exists('sjIsiPermintaan')) {
             sjKirim(400, ['status' => 'error', 'message' => 'Kiriman harus berupa objek JSON.']);
         }
         return $isi;
+    }
+}
+
+if (!function_exists('sjWajibAdmin')) {
+    // Untuk endpoint JSON di admin/: menuntut sesi admin dan token CSRF yang
+    // dipasang admin/sidik_jari.php. Mengembalikan admin_id; selain itu
+    // menjawab 401 atau 403 lalu berhenti.
+    //
+    // Sesi tidak dimulai untuk permintaan tanpa cookie sesi, supaya kiriman
+    // dari luar tidak dibalas dengan cookie baru. Sesinya hanya dibaca lalu
+    // langsung dilepas, supaya permintaan lain dari halaman yang sama tidak
+    // menunggu kuncinya.
+    function sjWajibAdmin($isi) {
+        $masuk = false;
+        $admin_id = 0;
+        $csrf = '';
+        if (isset($_COOKIE[session_name()]) && session_status() !== PHP_SESSION_ACTIVE) {
+            session_start(['read_and_close' => true]);
+            $masuk = isset($_SESSION['admin_logged_in']);
+            $admin_id = (int)($_SESSION['admin_id'] ?? 0);
+            $csrf = $_SESSION['sidik_jari_csrf'] ?? '';
+        }
+        if (!$masuk || $admin_id <= 0) {
+            sjKirim(401, ['status' => 'error', 'message' => 'Sesi admin berakhir. Masuk lagi ke panel admin.', 'perlu_masuk' => true]);
+        }
+        $kiriman = $isi['csrf'] ?? null;
+        if (!is_string($csrf) || $csrf === '' || !is_string($kiriman) || !hash_equals($csrf, $kiriman)) {
+            sjKirim(403, ['status' => 'error', 'message' => 'Token halaman tidak cocok. Muat ulang halaman pendaftaran.']);
+        }
+        return $admin_id;
+    }
+}
+
+// ---------- Pendaftaran jari ----------
+//
+// Templat sidik jari hanya ada di jembatan. Server mencatat siapa yang
+// menyetujui (persetujuan_sidik_jari) dan jari mana yang terdaftar di
+// perangkat mana (pendaftaran_sidik_jari). Catatan pendaftaran hanya ditulis
+// dari tanda terima bertanda tangan jembatan.
+
+if (!function_exists('sjOrang')) {
+    // Orang di balik sebuah identitas, atau null kalau tidak ada:
+    //   ['identitas', 'jenis' => 'siswa' atau 'guru', 'nama', 'kelompok',
+    //    'boleh' => bool, 'alasan' => teks kalau tidak boleh]
+    // Yang boleh didaftarkan: siswa yang belum lulus, dan guru yang punya
+    // jadwal piket Aktif.
+    function sjOrang($conn, $identitas) {
+        if (!sjBentukIdentitas($identitas)) {
+            return null;
+        }
+        list($jenis, $id) = explode(':', $identitas, 2);
+        $id = (int)$id;
+        if ($jenis === 'siswa') {
+            $stmt = $conn->prepare("SELECT nama_siswa, kelas FROM siswa WHERE id = ?");
+            $stmt->bind_param('i', $id);
+            $stmt->execute();
+            $baris = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if (!$baris) {
+                return null;
+            }
+            $lulus = $baris['kelas'] === 'Lulus / Alumni';
+            return ['identitas' => $identitas, 'jenis' => 'siswa', 'nama' => $baris['nama_siswa'], 'kelompok' => $baris['kelas'],
+                    'boleh' => !$lulus, 'alasan' => $lulus ? 'Siswa ini sudah lulus.' : ''];
+        }
+        $stmt = $conn->prepare("SELECT g.nama_guru, (SELECT COUNT(*) FROM jadwal_piket j WHERE j.guru_id = g.id AND j.status_jadwal = 'Aktif') AS piket FROM guru g WHERE g.id = ?");
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $baris = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if (!$baris) {
+            return null;
+        }
+        $piket = (int)$baris['piket'] > 0;
+        return ['identitas' => $identitas, 'jenis' => 'guru', 'nama' => $baris['nama_guru'], 'kelompok' => 'Guru piket',
+                'boleh' => $piket, 'alasan' => $piket ? '' : 'Guru ini tidak punya jadwal piket yang aktif.'];
+    }
+}
+
+if (!function_exists('sjPersetujuan')) {
+    // Baris persetujuan_sidik_jari untuk identitas itu, atau null.
+    function sjPersetujuan($conn, $identitas) {
+        $stmt = $conn->prepare("SELECT identitas, status, tanggal_surat, keterangan, admin_id, dicatat, tidak_terbaca FROM persetujuan_sidik_jari WHERE identitas = ?");
+        $stmt->bind_param('s', $identitas);
+        $stmt->execute();
+        $baris = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $baris ?: null;
+    }
+}
+
+if (!function_exists('sjCatatPendaftaran')) {
+    // Mencatat satu jari yang baru disimpan jembatan. Pendaftaran lama untuk
+    // jari yang sama di perangkat yang sama menjadi 'diganti', karena jembatan
+    // sudah menimpa templatnya. Tanda "jari tidak terbaca" orang itu dicabut.
+    //
+    // Panggil di dalam transaksi, setelah tanda terimanya terbukti sah. Kunci
+    // unik satu_aktif menolak baris aktif kedua untuk jari yang sama.
+    function sjCatatPendaftaran($conn, $perangkat, $identitas, $jari, $mutu, $admin_id) {
+        $kini = date('Y-m-d H:i:s');
+        $stmt = $conn->prepare("UPDATE pendaftaran_sidik_jari SET status = 'diganti', aktif = NULL, diubah = ?, diubah_admin = ? WHERE identitas = ? AND jari = ? AND perangkat = ? AND aktif = 1");
+        $stmt->bind_param('sisss', $kini, $admin_id, $identitas, $jari, $perangkat);
+        $stmt->execute();
+        $stmt->close();
+
+        $stmt = $conn->prepare("INSERT INTO pendaftaran_sidik_jari (identitas, jari, perangkat, mutu, terdaftar, admin_id, status, aktif) VALUES (?, ?, ?, ?, ?, ?, 'aktif', 1)");
+        $stmt->bind_param('sssisi', $identitas, $jari, $perangkat, $mutu, $kini, $admin_id);
+        $stmt->execute();
+        $stmt->close();
+
+        $stmt = $conn->prepare("UPDATE persetujuan_sidik_jari SET tidak_terbaca = NULL, tidak_terbaca_admin = NULL WHERE identitas = ?");
+        $stmt->bind_param('s', $identitas);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+if (!function_exists('sjCatatPencabutan')) {
+    // Menandai semua jari orang itu di perangkat itu sebagai 'dicabut'.
+    // Mengembalikan jumlah baris yang berubah. Panggil di dalam transaksi,
+    // setelah tanda terimanya terbukti sah.
+    function sjCatatPencabutan($conn, $perangkat, $identitas, $admin_id) {
+        $kini = date('Y-m-d H:i:s');
+        $stmt = $conn->prepare("UPDATE pendaftaran_sidik_jari SET status = 'dicabut', aktif = NULL, diubah = ?, diubah_admin = ? WHERE identitas = ? AND perangkat = ? AND aktif = 1");
+        $stmt->bind_param('siss', $kini, $admin_id, $identitas, $perangkat);
+        $stmt->execute();
+        $berubah = $stmt->affected_rows;
+        $stmt->close();
+        return $berubah;
+    }
+}
+
+if (!function_exists('sjTandaiTidakTerbaca')) {
+    // Mencatat bahwa jari orang itu tidak bisa didaftarkan. Hanya menyentuh
+    // baris yang persetujuannya 'setuju'; pemanggil yang memastikan baris itu
+    // ada. Pendaftaran yang berhasil kemudian mencabut tanda ini.
+    function sjTandaiTidakTerbaca($conn, $identitas, $admin_id) {
+        $kini = date('Y-m-d H:i:s');
+        $stmt = $conn->prepare("UPDATE persetujuan_sidik_jari SET tidak_terbaca = ?, tidak_terbaca_admin = ? WHERE identitas = ? AND status = 'setuju'");
+        $stmt->bind_param('sis', $kini, $admin_id, $identitas);
+        $stmt->execute();
+        $stmt->close();
     }
 }
