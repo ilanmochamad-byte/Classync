@@ -36,6 +36,7 @@ require '../includes/db.php';
                 <li><a class="dropdown-item" href="siswa.php">Data Siswa</a></li>
                 <li><a class="dropdown-item" href="mutasi_siswa.php">Mutasi & Kelulusan Siswa</a></li>
                 <li><a class="dropdown-item" href="alumni.php">Data Alumni</a></li>
+                <li><a class="dropdown-item" href="sidik_jari.php">Pendaftaran Sidik Jari</a></li>
             </ul>
         </li>
         <li class="nav-item dropdown">
