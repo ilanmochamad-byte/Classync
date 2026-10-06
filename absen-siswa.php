@@ -589,5 +589,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 </script>
+<?php $sj_detak_klien = __DIR__ . '/includes/sj_detak_klien.php'; if (is_readable($sj_detak_klien)) { try { include $sj_detak_klien; } catch (Throwable $e) { /* detak kiosk tidak boleh merusak halaman ini */ } } ?>
 </body>
 </html>

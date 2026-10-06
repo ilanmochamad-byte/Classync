@@ -114,11 +114,23 @@ log pun.
 |---|---|---|
 | `~/Documents/GitHub/classync` | panel admin & web | cPanel Git → `smkt.alhasan.co.id/classync` |
 | `~/Documents/GitHub/api.smkt.alhasan.co.id` | 73 endpoint untuk aplikasi | cPanel Git → `api.smkt.alhasan.co.id` |
-| `~/ClassyncApp` | aplikasi React Native/Expo | rilis Play Store & App Store |
+| `~/ClassyncApp` | aplikasi React Native/Expo | rilis Play Store & App Store; OTA sejak 3.0.0 |
 
-Tidak ada OTA — `expo-updates` tidak terpasang. Perubahan backend yang memutus
-kontrak JSON hanya bisa diperbaiki lewat rilis toko, berminggu-minggu.
+**OTA baru ada sejak ClassyncApp 3.0.0**, yang dirilis 27 September 2026 dan
+memasang `expo-updates`. Perbaikan JavaScript untuk pemakai 3.0 bisa dikirim
+lewat `eas update` tanpa rilis toko; cara dan batasnya ada di `CLAUDE.md`
+ClassyncApp. Aturan kompatibel mundur tidak berubah:
+
+- versi 2.9.2 ke bawah tidak punya OTA. Untuk mereka, perubahan backend yang
+  memutus kontrak JSON tetap hanya bisa diperbaiki lewat rilis toko,
+  berminggu-minggu;
+- OTA hanya sampai ke build berversi sama (`runtimeVersion` berpolicy
+  `appVersion`), dan perubahan modul native tetap butuh build toko.
+
 Sebaliknya, perbaikan backend berlaku seketika.
+
+Kalimat "Tidak ada OTA" bertahan di sini sampai 6 Oktober 2026, sembilan hari
+setelah 3.0.0 rilis: dokumen ini tidak diperbarui saat rilisnya.
 
 Semua unggahan foto dari **kedua** situs bermuara di `classync/uploads/` —
 empat endpoint di repo API menulis ke sana dengan jalur absolut.
@@ -328,7 +340,9 @@ pantau belum ada laporan yang membaca `status_harian`. Yang masih menunggu:
 - **Sebelas berkas laporan pindah ke `status_harian`,** satu per satu,
   termasuk dua di repo API. Tanggal sebelum aturan ini berlaku tetap memakai
   logika lama.
-- **Sidik jarinya sendiri.**
+- **Sidik jarinya sendiri.** Fondasinya sudah ada, lihat "Absensi sidik jari:
+  jembatan, tantangan, dan detak kiosk" di bawah. Pendaftaran jari dan absen
+  lewat sidik jari belum dibuka.
 
 Terverifikasi di produksi 28 September 2026:
 
@@ -359,6 +373,201 @@ Tabel dan kolomnya dibuat manual di phpMyAdmin, jadi tidak ada di repo:
       sakit INT NOT NULL DEFAULT 0, alpa INT NOT NULL DEFAULT 0, pkl INT NOT NULL DEFAULT 0,
       PRIMARY KEY (id), KEY tanggal (tanggal));
     -- ditambah satu baris pengaturan: jam_pulang_jumat = '10:50:00'
+
+## Absensi sidik jari: jembatan, tantangan, dan detak kiosk
+
+Pekerjaan sidik jarinya sendiri dibagi lima sub-langkah, dan nomornya dipakai
+di README jembatan dan di kode: 4.1 prototipe jembatan, 4.2 fondasi server,
+4.3 pendaftaran jari, 4.4 kiosk berdampingan dengan QR/NISN, dan 4.5
+peralihan. Yang sudah ada di repo adalah 4.1 (PR #18–#22) dan 4.2: sisi
+server di PR #23, jembatan 0.2.0 di PR #24, lalu detak dari halaman kiosk.
+
+**Absen lewat sidik jari belum dibuka.** Alur QR/NISN di `absen-siswa.php`
+dan `api/proses_absen_siswa.php` tidak berubah. Yang ada baru detak: bukti
+bahwa halaman kiosk, jembatan, dan server saling mengenali.
+
+**Tiga bagian, dan jembatan tidak ikut deploy.**
+
+| Bagian | Berkas | Sampai ke tempatnya lewat |
+|---|---|---|
+| jembatan | `jembatan/`, layanan Windows di PC kiosk yang hanya mendengar di `127.0.0.1:47890` | `.exe` yang dibangun di Mac lalu disalin lewat USB; `.cpanel.yml` tidak menyalin folder itu |
+| server | `includes/sidik_jari.php`, `api/sj_tantangan.php`, `api/sj_detak.php`, `admin/kiosk_sidik_jari.php` | deploy biasa |
+| halaman kiosk | `includes/sj_detak_klien.php`, di-include `absen-siswa.php` | deploy biasa |
+
+Jembatan mencocokkan sidik jari dan menandatangani hasilnya dengan HMAC,
+memakai kunci per kiosk. Ia tidak pernah menghubungi server sendiri: halaman
+yang membawa tantangan dari server ke jembatan, lalu membawa tanda tangannya
+kembali.
+
+Cara membangun, memasang, memasangkan, dan menguji jembatan ada di
+`jembatan/README.md`, beserta hasil ukur 3 dan 5 Oktober 2026. Jangan
+disalin ke sini. Tiga hal dari sana yang mudah terlewat:
+
+- `hapus-layanan.ps1 -HapusData` menghapus kunci yang dikenal server. Kiosk
+  harus dipasangkan ulang, dan semua jari didaftarkan ulang.
+- Mengganti driver pembaca atau versi SourceAFIS juga membuat semua jari
+  harus didaftarkan ulang.
+- Selain halamannya sendiri, jembatan hanya menerima asal
+  `https://smkt.alhasan.co.id`. Menguji rantainya dengan server lokal butuh
+  `--pengembangan --asal-kiosk http://127.0.0.1:<port>`, yang ditolak
+  layanan di PC kiosk.
+
+**Kunci ada di luar webroot**, di folder yang sama dengan `db-classync.php`
+dan `fcm-classync.php`:
+
+    /DATA/k1807225/config/sidik-jari-classync.php
+
+```php
+$sj_rahasia_tantangan = ['<64 karakter hex>'];
+$sj_perangkat = ['kiosk-xxxxxx' => ['aktif' => true, 'kunci' => ['<64 karakter hex>']]];
+```
+
+- **Keduanya berupa daftar,** supaya bisa dirotasi tanpa deploy: tambahkan
+  yang baru, alihkan, lalu cabut yang lama. Rahasia pertama dipakai
+  menerbitkan tantangan, dan semua yang terdaftar diterima.
+- **Rahasia tantangan** dibuat di Terminal cPanel dengan
+  `openssl rand -hex 32`.
+- **ID dan kunci perangkat dibuat jembatan sendiri.** Kuncinya hanya keluar
+  lewat `jembatan-sidik-jari.exe --pasangan` di PowerShell admin PC kiosk,
+  bersama blok yang tinggal ditempel ke `$sj_perangkat`. Langkahnya ada di
+  README jembatan, "Memasang di PC kiosk dan memasangkannya dengan server".
+- **Perubahan berkas ini berlaku seketika.** Mengosongkan `$sj_perangkat`,
+  atau mengubah `'aktif'` menjadi `false`, mencabut kiosk tanpa deploy.
+- **Yang boleh dibagikan hanya sidik kunci:** delapan karakter pertama
+  SHA-256 atas byte kunci. Jembatan menampilkannya di `/status` dan
+  `--pasangan`, server di halaman pantau. Sidik yang sama berarti kunci yang
+  sama. Kunci dan rahasia itu sendiri tidak boleh masuk Git, PR, atau
+  percakapan.
+
+**Tantangan dan detak.** Sekali semenit halaman kiosk menjalankan satu
+rantai:
+
+1. `GET /status` ke jembatan, untuk mendapat ID perangkatnya;
+2. `POST api/sj_tantangan.php`, yang menerbitkan tantangan untuk perangkat
+   itu;
+3. `POST /detak` ke jembatan, yang menandatangani
+   `SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>`;
+4. `POST api/sj_detak.php`, yang menyusun ulang pesan itu sendiri,
+   mencocokkan HMAC-nya, lalu mencatat satu baris di `detak_kiosk`.
+
+Detak yang sampai membuktikan seluruh rantainya hidup: halaman kiosk,
+jembatan, dan kunci yang sama di kedua sisi.
+
+- **Kedua endpoint terbuka untuk umum,** karena halaman kiosk tidak punya
+  sesi. Penjaganya kunci perangkat, lewat dua hal di bawah. Jangan
+  menambahkan tulisan ke basis data atau ke `error_log` sebelum tanda tangan
+  perangkat terbukti sah: orang luar bisa memakainya untuk memenuhi tabel
+  atau log.
+  - Tantangan tidak disimpan saat diterbitkan. Isinya waktu terbit, byte
+    acak, dan tanda dari rahasia server.
+  - Basis data baru dibuka setelah tanda tangan perangkat terbukti sah.
+- **Tantangan sekali pakai.** Berlaku 120 detik, dan terikat pada tujuan dan
+  perangkatnya. Kunci utama `tantangan_kiosk` yang menolak pemakaian kedua,
+  termasuk dari kiriman serentak.
+- **Tujuan yang dibuka baru `detak`.** Pesan `SJ1|absen|…` sudah dikenal
+  jembatan dan pustaka, tetapi belum ada endpoint yang menerimanya.
+- **Kolom `alat` adalah keadaan pembaca menurut Windows,** bukan menurut ADC
+  yang dipakai halaman untuk menangkap sidik jari. Pada uji 5 Oktober pembaca
+  hilang dari ADC selagi PC ditinggal, sementara detak tetap melaporkan alat
+  terpasang. Jadi `alat = 1` belum membuktikan kiosk bisa menangkap jari.
+- **Masalah konfigurasi tampil di halaman pantau, bukan di `error_log`.**
+  Yang masuk ke `classync/error_log` hanya galat server yang tidak bisa
+  dipicu dari luar: `[sj_detak]` untuk galat basis data setelah tanda tangan
+  sah, dan `[sj_tantangan]` kalau tantangan tidak bisa dibuat.
+- **Kedua endpoint aman dibuka lewat URL.** Permintaan selain POST dijawab
+  405 sebelum apa pun dibaca.
+
+**Detak dari halaman kiosk** ada di `includes/sj_detak_klien.php`.
+
+- **Senyap.** Tidak ada yang tampil di halaman kiosk. Kegagalannya hanya
+  dicatat di konsol peramban, berawalan `[detak kiosk]`.
+- **Hanya dikeluarkan kalau server punya perangkat aktif yang berkunci.**
+  Sebelum itu keluaran `absen-siswa.php` sama byte demi byte dengan sebelum
+  skrip ini ada. Jadi mengosongkan `$sj_perangkat` juga mematikan detak.
+- **Hanya berjalan di peramban kiosk.** Halaman kiosk terbuka untuk umum, dan
+  di luar PC kiosk permintaan ke `127.0.0.1` membuat Chrome memunculkan
+  permintaan izin jaringan lokal. Skripnya baru menyentuh `127.0.0.1` kalau
+  salah satu ini benar:
+  - izin `loopback-network` untuk situs ini berstatus `granted`. Di PC kiosk
+    izin itu diharapkan datang dari kebijakan Chrome,
+    `jembatan/kebijakan-chrome.reg`;
+  - peramban itu ditandai sebagai kiosk. `absen-siswa.php?detak=hidup`
+    memasang tandanya, dan `?detak=mati` mencabutnya. Tandanya tersimpan di
+    `localStorage`, jadi berlaku per profil Chrome dan ikut hilang kalau data
+    situs dihapus.
+- **Jadwalnya juga disimpan di `localStorage`.** Halaman kiosk memuat ulang
+  dirinya 2 detik setelah tiap scan berhasil. Pewaktu biasa akan terulang
+  dari nol pada jam sibuk, dan kiosk tampak diam justru saat paling ramai.
+- **Galat di berkas ini tidak boleh merusak halaman kiosk.**
+  `absen-siswa.php` meng-include-nya setelah `is_readable()`, di dalam
+  `try`/`catch`.
+
+**Halaman pantau** ada di `admin/kiosk_sidik_jari.php` (Laporan → Kiosk Sidik
+Jari).
+
+- **"Hidup" berarti detak terakhir belum lewat 3 menit.** Detak hanya ada
+  selama halaman kiosk terbuka di Chrome PC kiosk. PC yang mati dan halaman
+  kiosk yang tertutup sama-sama terbaca "diam".
+- **Ringkasan 7 hari per perangkat:** detak pertama dan terakhir, jumlah
+  detak, jeda di atas 3 menit, dan detak tanpa alat.
+- **Tombol Uji rantai** menjalankan satu detak dari peramban yang membuka
+  halaman itu. Jembatan hanya mendengar di `127.0.0.1`, jadi uji ini hanya
+  berhasil di PC kiosk. Dari komputer lain ia gagal di baris pertama, dan itu
+  bukan tanda kiosk rusak.
+
+Kalau kiosk "diam" padahal halamannya terbuka, periksa berurutan:
+
+1. bagian atas halaman pantau, tempat masalah konfigurasi dan tabel yang
+   belum dibuat ditampilkan;
+2. **Uji rantai** dari PC kiosk. Baris yang merah menunjukkan bagian yang
+   bermasalah;
+3. konsol halaman kiosk (F12). Baris `[detak kiosk] aktif lewat izin` atau
+   `[detak kiosk] aktif lewat penanda` harus ada, dan baris peringatan
+   `[detak kiosk]` menyebut bagian yang gagal. Kalau tidak ada satu pun,
+   peramban itu belum melewati gerbangnya: buka
+   `absen-siswa.php?detak=hidup` sekali.
+
+Belum teruji saat catatan ini ditulis, 6 Oktober 2026:
+
+- **Seluruh 4.2 di produksi.** Ujinya baru di lokal: PHP 8.4, MariaDB 12.3,
+  dan jembatan mode pengembangan di Mac. Server memakai PHP 8.3 dan MariaDB
+  10.6. Yang harus diverifikasi di sana: kedua tabel, berkas konfigurasi,
+  pemasangan jembatan 0.2.0 di PC kiosk, Uji rantai, dan detak dari halaman
+  kiosk sepanjang jam sekolah.
+- **Apakah izin dari kebijakan Chrome terbaca `granted`.** Dokumentasi Chrome
+  tidak menyebutnya. Jalankan ini di konsol halaman kiosk; kalau jawabannya
+  bukan `granted`, kiosk memakai `?detak=hidup`:
+  `navigator.permissions.query({name: 'loopback-network'}).then(p => console.log(p.state), console.error)`
+- **Start otomatis layanan setelah restart, dan tiga pemeriksaan akun
+  standar.** Keduanya ada di fase C README jembatan.
+
+Yang masih menunggu sesudah 4.2:
+
+- **4.3, pendaftaran jari.** Uji 5 Oktober memenuhi kriteria aman dan waktu,
+  tetapi pengenalan pada tempelan pertama baru 82,8% dari syarat 90%.
+  Syarat perbaikannya ada di README jembatan, "Kriteria lanjut ke 4.2":
+  gerbang mutu saat mendaftar, dua jari terbaik per orang, dan aturan
+  keserasian yang lebih ketat.
+- **4.4, kiosk berdampingan dengan QR/NISN.** Layar kiosk tidak boleh mati,
+  detak memuat keadaan pembaca menurut ADC, dan tingkat pengenalan diukur
+  ulang dengan siswa.
+- **4.5, peralihan.**
+
+Kedua tabelnya dibuat manual di phpMyAdmin, jadi tidak ada di repo. Keduanya
+membersihkan diri sendiri: `tantangan_kiosk` hanya menyimpan tantangan yang
+sudah dipakai, selama sehari, dan `detak_kiosk` satu baris per detak selama
+60 hari.
+
+    CREATE TABLE tantangan_kiosk (
+      tantangan CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+      tujuan VARCHAR(16) NOT NULL, perangkat VARCHAR(32) NOT NULL,
+      dipakai DATETIME NOT NULL,
+      PRIMARY KEY (tantangan), KEY dipakai (dipakai));
+    CREATE TABLE detak_kiosk (
+      id INT NOT NULL AUTO_INCREMENT, waktu DATETIME NOT NULL,
+      perangkat VARCHAR(32) NOT NULL, alat TINYINT NOT NULL,
+      versi VARCHAR(64) NOT NULL DEFAULT '',
+      PRIMARY KEY (id), KEY perangkat_waktu (perangkat, waktu));
 
 ## Temuan audit
 
@@ -971,9 +1180,10 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   `proses_absen_manual.php`, `get_jadwal_admin.php`,
   `update_absen_harian.php`, `delete_absen_harian.php`,
   `ekspor_detail_absensi.php`, `generate_pdf_absensi.php`, dan `db.php`
-  dipanggil panel web. Catatan lama di sini hanya menyebut pemakaian oleh
-  panel admin, dan itu keliru — grep di repo ini tidak akan menemukan
-  pemanggil dari aplikasi.
+  dipanggil panel web; `sj_tantangan.php` dan `sj_detak.php` dipanggil
+  halaman kiosk dan `admin/kiosk_sidik_jari.php`, bukan aplikasi. Catatan
+  lama di sini hanya menyebut pemakaian oleh panel admin, dan itu keliru —
+  grep di repo ini tidak akan menemukan pemanggil dari aplikasi.
 - Ekspor Excel di halaman rekap/laporan absensi **rusak sejak sebelum**
   pekerjaan kredensial: `admin/laporan.php:8` memanggil `../vendor/autoload.php`
   sementara PhpSpreadsheet ada di `admin/PhpOffice/`. Bukan regresi.
