@@ -7,8 +7,10 @@
 //
 // Aturan yang dipegang:
 // - Galeri hanya berisi templat, dimuat dari templat.json yang terenkripsi.
-//   Gambar sidik jari tidak pernah ditulis ke disk. Gambar pendaftaran hanya
-//   disimpan di memori selama jembatan hidup, untuk kalibrasi DPI.
+//   Gambar sidik jari tidak pernah ditulis ke disk. Gambar pendaftaran uji
+//   disimpan di memori selama jembatan hidup, untuk kalibrasi DPI. Gambar
+//   pendaftaran siswa dan guru tidak disimpan sama sekali: begitu templatnya
+//   diekstrak, gambarnya dilepas.
 // - SourceAFIS tidak tahan beda skala, jadi probe dan galeri harus diekstrak
 //   dengan DPI yang sama. DPI itu ditulis di kolom versi setiap rekaman,
 //   bersama versi pustaka, karena keduanya menentukan apakah dua templat bisa
@@ -24,8 +26,15 @@
 // - Rekaman templat.json yang gagal dibuka tidak dibuang diam-diam: ia
 //   dihitung, dilaporkan di /status, dan tetap ditulis kembali apa adanya.
 //
-// Pendaftaran tanpa token server, kalibrasi, ukur waktu, dan hapus data uji
-// hanya untuk prototipe 4.1.
+// - Siswa dan guru hanya bisa didaftarkan dan dicabut lewat sesi berizin:
+//   jembatan menerbitkan tantangan, dan server menandatanganinya untuk satu
+//   orang dan satu jari (lihat Brankas.cs). Empat tempelan harus lolos
+//   gerbang mutu, lalu satu tempelan uji harus dikenali sebagai orang itu.
+//   Nilai mutu dari alat tidak dipakai: pada uji 5 Oktober 2026 nilainya
+//   "Good" untuk semua tempelan, juga yang kemudian tidak dikenali.
+//
+// Pendaftaran tanpa izin server, kalibrasi, ukur waktu, dan hapus data uji
+// hanya ada di jendela konsol, dan hanya untuk identitas uji:.
 
 using System.Buffers.Binary;
 using System.Collections.Immutable;
@@ -50,6 +59,20 @@ sealed class Pencocok
     const double AmbangSatuLawanSatu = 40;
 
     public const int JumlahTempelan = 4;
+
+    // Gerbang mutu pendaftaran: keserasian terendah keempat tempelan. Dihitung
+    // mundur dari uji 5 Oktober 2026 (36 jari, enam orang dewasa): jari yang
+    // lolos angka ini dikenali 92,6% pada tempelan pertama dan 100% dalam
+    // tiga, sedangkan aturan lama (40) memberi 82,8% dan 93,9%.
+    public const double GerbangMutu = 80;
+
+    // Batas satu sesi pendaftaran berizin.
+    public const int MaksTempelan = 10;
+    public const int MaksUji = 3;
+    public const int UmurSesiDetik = 900;
+    // Sesi terbuka paling banyak, dihitung per golongan: pendaftaran yang
+    // belum diizinkan, pendaftaran yang sudah diizinkan, dan pencabutan.
+    const int MaksSesi = 4;
     // DPI galeri sebelum ada pendaftaran, dan DPI untuk sampel yang tidak
     // membawa DPI (PNG). Pendaftaran pertama di galeri kosong menggantinya
     // dengan DPI yang dilaporkan sampelnya; galeri yang sudah berisi tetap
@@ -77,6 +100,12 @@ sealed class Pencocok
     ImmutableArray<RekamanTemplat> _rekamanTertolak = [];
     volatile Galeri _galeri = new(DpiBawaan, []);
     volatile Probe? _probeTerakhir;
+
+    // Sesi pendaftaran dan pencabutan berizin. Urutan kunci: _kunciSesi dulu,
+    // baru _kunciUbah; tidak pernah sebaliknya.
+    readonly Lock _kunciSesi = new();
+    readonly Dictionary<string, SesiDaftar> _sesiDaftar = new(StringComparer.Ordinal);
+    readonly Dictionary<string, SesiCabut> _sesiCabut = new(StringComparer.Ordinal);
 
     Pencocok(Brankas brankas, ILogger log)
     {
@@ -249,10 +278,12 @@ sealed class Pencocok
         });
     }
 
-    // Pendaftaran uji: tepat empat tempelan satu jari dalam satu kiriman.
-    // Setiap tempelan harus cocok dengan salah satu tempelan lain, dan tidak
-    // boleh mirip jari yang sudah terdaftar atas nama identitas lain.
-    // Mendaftarkan ulang identitas dan jari yang sama menggantikan yang lama.
+    // Pendaftaran uji, hanya dari halaman uji di jendela konsol dan hanya
+    // untuk identitas uji:. Tepat empat tempelan satu jari dalam satu kiriman.
+    // Gerbang mutunya sama dengan pendaftaran berizin, supaya angka halaman
+    // uji mencerminkan aturan yang dipakai untuk siswa. Jari itu tidak boleh
+    // mirip jari yang sudah terdaftar atas nama identitas lain. Mendaftarkan
+    // ulang identitas dan jari yang sama menggantikan yang lama.
     public Hasil Daftarkan(PermintaanDaftar permintaan)
     {
         var mulai = Stopwatch.GetTimestamp();
@@ -269,6 +300,10 @@ sealed class Pencocok
         if (!Brankas.MetadataSah(identitas, jari, 1, AwalanVersi + _galeri.Dpi))
         {
             return Hasil.Galat(400, "Identitas atau jari tidak sah.");
+        }
+        if (!Brankas.IdentitasUji(identitas))
+        {
+            return Hasil.Galat(400, "Halaman uji hanya mendaftarkan identitas uji. Siswa dan guru didaftarkan dari panel admin.");
         }
         var sampel = new Sampel[JumlahTempelan];
         for (var i = 0; i < JumlahTempelan; i++)
@@ -307,22 +342,15 @@ sealed class Pencocok
                 }
             }
 
-            var keserasian = new double[JumlahTempelan];
-            for (var i = 0; i < JumlahTempelan; i++)
+            var (keserasian, terhubung) = NilaiKeserasian(templat);
+            if (keserasian.Min() < GerbangMutu || !terhubung)
             {
-                var pencocok = new FingerprintMatcher(templat[i]);
-                for (var j = 0; j < JumlahTempelan; j++)
+                var lemah = Enumerable.Range(0, JumlahTempelan).Where(i => keserasian[i] < GerbangMutu).Select(i => i + 1).ToArray();
+                if (lemah.Length == 0)
                 {
-                    if (j != i)
-                    {
-                        keserasian[i] = Math.Max(keserasian[i], pencocok.Match(templat[j]));
-                    }
+                    lemah = [TempelanTerlemah(keserasian) + 1];
                 }
-            }
-            var lemah = Enumerable.Range(0, JumlahTempelan).Where(i => keserasian[i] < AmbangSatuLawanSatu).Select(i => i + 1).ToArray();
-            if (lemah.Length > 0)
-            {
-                return Hasil.Galat(422, $"Tempelan ke-{string.Join(", ", lemah)} tidak cocok dengan tempelan lain. Ulangi tempelan itu.",
+                return Hasil.Galat(422, $"Tempelan ke-{string.Join(", ", lemah)} tidak cukup serasi dengan tempelan lain. Ulangi tempelan itu.",
                                    new { skor_keserasian = keserasian.Select(s => Bulat(s)), tempelan_lemah = lemah });
             }
 
@@ -390,6 +418,477 @@ sealed class Pencocok
                 sampel = InfoSampel(sampel[0]),
                 waktu_ms = Ms(Stopwatch.GetElapsedTime(mulai)),
             });
+        }
+    }
+
+    // ---------- Pendaftaran dan pencabutan berizin ----------
+    //
+    // Satu sesi untuk satu jari milik satu orang:
+    //   mulai    jembatan menerbitkan sesi: tantangan sekali pakai;
+    //   izin     halaman membawa tanda tangan server atas sesi itu;
+    //   tempel   empat tempelan, dinilai begitu lengkap. Selama belum lolos
+    //            gerbang mutu, tempelan terlemah dibuang dan diminta ulang.
+    //            Sesudah lolos, satu tempelan uji harus dikenali sebagai jari
+    //            yang baru didaftarkan;
+    //   selesai  templat disimpan, dan tanda terimanya ditandatangani untuk
+    //            server.
+    // Tidak ada yang disimpan sebelum "selesai". Sesi hanya memegang templat
+    // tempelannya, bukan gambarnya.
+
+    public Hasil MulaiDaftar(PermintaanMulaiDaftar permintaan)
+    {
+        if (!Brankas.IdentitasResmi(permintaan.Identitas)
+            || !Brankas.MetadataSah(permintaan.Identitas, permintaan.Jari, 1, AwalanVersi + DpiBawaan))
+        {
+            return Hasil.Galat(400, "Identitas atau jari tidak sah.");
+        }
+        var sesi = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+        lock (_kunciSesi)
+        {
+            // Sesi baru hanya menggusur sesi lain yang juga belum diizinkan.
+            // Rute ini bisa dipanggil tanpa izin, jadi ia tidak boleh bisa
+            // membuang pendaftaran yang sedang berjalan.
+            BuangSesiLama(_sesiDaftar, s => s.Dibuat, s => s.Tahap == Tahap.MenungguIzin);
+            _sesiDaftar[sesi] = new SesiDaftar(permintaan.Identitas!, permintaan.Jari!);
+        }
+        return Hasil.Oke(new { status = "ok", sesi, berlaku_detik = UmurSesiDetik });
+    }
+
+    public Hasil IzinkanDaftar(PermintaanIzin permintaan)
+    {
+        lock (_kunciSesi)
+        {
+            var sesi = CariSesiDaftar(permintaan.Sesi);
+            if (sesi is null)
+            {
+                return SesiTidakAda();
+            }
+            if (sesi.Tahap != Tahap.MenungguIzin)
+            {
+                return Hasil.Galat(409, "Sesi ini sudah diizinkan.");
+            }
+            if (!_brankas.IzinDaftarSah(permintaan.Sesi!, sesi.Identitas, sesi.Jari, permintaan.Izin))
+            {
+                // Sesinya dibuang, supaya satu tantangan tidak bisa dicoba
+                // dengan izin yang berbeda-beda.
+                _sesiDaftar.Remove(permintaan.Sesi!);
+                _log.LogWarning("Izin pendaftaran {Identitas}/{Jari} tidak cocok.", sesi.Identitas, sesi.Jari);
+                return Hasil.Galat(403, "Izin dari server tidak cocok. Mulai lagi.");
+            }
+            // Sesi yang sudah diizinkan dibatasi tersendiri, dan hanya izin
+            // yang sah yang bisa menggusur salah satunya.
+            BuangSesiLama(_sesiDaftar, s => s.Dibuat, s => s.Tahap != Tahap.MenungguIzin);
+            sesi.Tahap = Tahap.Menangkap;
+            return Hasil.Oke(new { status = "ok", tahap = "tempel", diterima = 0, butuh = JumlahTempelan });
+        }
+    }
+
+    // Satu tempelan untuk sesi yang sudah diizinkan. pngBoleh hanya benar
+    // dalam mode pengembangan; di PC kiosk hanya sampel raw yang diterima.
+    public Hasil Tempel(PermintaanTempel permintaan, bool pngBoleh)
+    {
+        lock (_kunciSesi)
+        {
+            var sesi = CariSesiDaftar(permintaan.Sesi);
+            if (sesi is null)
+            {
+                return SesiTidakAda();
+            }
+            if (sesi.Tahap == Tahap.MenungguIzin)
+            {
+                return Hasil.Galat(409, "Sesi ini belum diizinkan server.");
+            }
+            if (sesi.Tahap == Tahap.Lulus)
+            {
+                return Hasil.Galat(409, "Sesi ini sudah lulus. Selesaikan pendaftarannya.");
+            }
+            if (!pngBoleh && !string.Equals(permintaan.Format, "raw", StringComparison.Ordinal))
+            {
+                return Hasil.Galat(400, "Pendaftaran hanya menerima sampel raw.");
+            }
+            Sampel sampel;
+            try
+            {
+                sampel = Sampel.Baca(permintaan.Format, permintaan.Sampel);
+            }
+            catch (SampelTidakSahException e)
+            {
+                return Hasil.Galat(400, e.Message);
+            }
+            if (!_kembar.Tandai(sampel.Sidik))
+            {
+                return Hasil.Galat(409, "Sampel ini sama persis dengan sampel sebelumnya. Tempelkan jari lagi.");
+            }
+            var galeri = _galeri;
+            if (sesi.Tempelan == 0)
+            {
+                // Sama dengan pendaftaran uji: galeri kosong mengikuti DPI
+                // yang dilaporkan alat, galeri berisi memakai DPI-nya.
+                sesi.Dpi = galeri.Entri.IsEmpty && sampel.DpiAlat is int dpiAlat && DpiMasukAkal(dpiAlat) ? dpiAlat : galeri.Dpi;
+            }
+            FingerprintTemplate templat;
+            try
+            {
+                templat = Ekstrak(sampel, sesi.Dpi);
+            }
+            catch (SampelTidakSahException e)
+            {
+                return Hasil.Galat(400, e.Message);
+            }
+            return sesi.Tahap == Tahap.Menangkap
+                ? TempelDaftar(permintaan.Sesi!, sesi, templat, galeri)
+                : TempelUji(permintaan.Sesi!, sesi, templat, galeri);
+        }
+    }
+
+    Hasil TempelDaftar(string id, SesiDaftar sesi, FingerprintTemplate templat, Galeri galeri)
+    {
+        sesi.Tempelan++;
+        sesi.Calon.Add(templat);
+        if (sesi.Calon.Count < JumlahTempelan)
+        {
+            return Hasil.Oke(new { status = "ok", tahap = "tempel", diterima = sesi.Calon.Count, butuh = JumlahTempelan, tempelan = sesi.Tempelan });
+        }
+
+        var (keserasian, terhubung) = NilaiKeserasian(sesi.Calon);
+        var skor = keserasian.Select(s => Bulat(s)).ToArray();
+        if (keserasian.Min() < GerbangMutu || !terhubung)
+        {
+            if (sesi.Tempelan >= MaksTempelan)
+            {
+                _sesiDaftar.Remove(id);
+                _log.LogWarning("Pendaftaran {Identitas}/{Jari} gagal: keserasian {Keserasian} setelah {Tempelan} tempelan.",
+                                    sesi.Identitas, sesi.Jari, string.Join(" ", skor), sesi.Tempelan);
+                return Hasil.Galat(422, $"Jari ini tidak cukup serasi setelah {MaksTempelan} tempelan. Coba jari lain.",
+                                   new { tahap = "gagal", skor_keserasian = skor });
+            }
+            var buang = TempelanTerlemah(keserasian);
+            sesi.Calon.RemoveAt(buang);
+            return Hasil.Oke(new
+            {
+                status = "ok",
+                tahap = "tempel",
+                diterima = sesi.Calon.Count,
+                butuh = JumlahTempelan,
+                tempelan = sesi.Tempelan,
+                dibuang = buang + 1,
+                skor_keserasian = skor,
+                alasan = "Satu tempelan belum serasi dengan yang lain. Tempelkan jari yang sama sekali lagi, dengan cara yang sama.",
+            });
+        }
+
+        var mirip = JariLainTermirip(sesi, galeri);
+        if (mirip is not null)
+        {
+            _sesiDaftar.Remove(id);
+            return JariSudahTerdaftar(sesi, mirip);
+        }
+        sesi.Keserasian = keserasian;
+        sesi.Tahap = Tahap.MenungguUji;
+        return Hasil.Oke(new { status = "ok", tahap = "uji", skor_keserasian = skor, mutu = MutuDari(keserasian), tempelan = sesi.Tempelan });
+    }
+
+    // Tempelan uji: aturannya sama dengan identifikasi di kiosk, tetapi yang
+    // dihitung hanya templat yang baru. Jari lain milik orang yang sama tidak
+    // boleh menolong, karena yang diuji adalah jari ini.
+    Hasil TempelUji(string id, SesiDaftar sesi, FingerprintTemplate templat, Galeri galeri)
+    {
+        sesi.Uji++;
+        var pencocok = new FingerprintMatcher(templat);
+        var skorBaru = sesi.Calon.Max(c => pencocok.Match(c));
+        var skorLain = 0.0;
+        foreach (var e in galeri.Entri.Where(e => e.Identitas != sesi.Identitas))
+        {
+            skorLain = Math.Max(skorLain, pencocok.Match(e.Templat));
+        }
+        if (skorBaru >= Ambang && skorBaru - skorLain >= Selisih)
+        {
+            sesi.Tahap = Tahap.Lulus;
+            return Hasil.Oke(new { status = "ok", tahap = "siap", dikenali = true, skor_uji = Bulat(skorBaru), skor_orang_lain = Bulat(skorLain) });
+        }
+        if (sesi.Uji >= MaksUji)
+        {
+            _sesiDaftar.Remove(id);
+            _log.LogWarning("Pendaftaran {Identitas}/{Jari} gagal: tempelan uji tidak dikenali (skor {Skor:F1}).", sesi.Identitas, sesi.Jari, skorBaru);
+            return Hasil.Galat(422, "Tempelan uji tidak dikenali sebagai jari yang baru didaftarkan. Ulangi pendaftaran jari ini.",
+                               new { tahap = "gagal", skor_uji = Bulat(skorBaru), skor_orang_lain = Bulat(skorLain) });
+        }
+        return Hasil.Oke(new
+        {
+            status = "ok",
+            tahap = "uji",
+            dikenali = false,
+            skor_uji = Bulat(skorBaru),
+            skor_orang_lain = Bulat(skorLain),
+            sisa = MaksUji - sesi.Uji,
+        });
+    }
+
+    // Menyimpan templat sesi yang sudah lulus, lalu menandatangani tanda
+    // terimanya dengan tantangan dari server.
+    public Hasil SelesaiDaftar(PermintaanSelesai permintaan)
+    {
+        if (!Brankas.TantanganSah(permintaan.Tantangan))
+        {
+            return Hasil.Galat(400, "Tantangan tidak sah.");
+        }
+        lock (_kunciSesi)
+        {
+            var sesi = CariSesiDaftar(permintaan.Sesi);
+            if (sesi is null)
+            {
+                return SesiTidakAda();
+            }
+            if (sesi.Tahap != Tahap.Lulus)
+            {
+                return Hasil.Galat(409, "Pendaftaran ini belum lulus tempelan uji.");
+            }
+            _sesiDaftar.Remove(permintaan.Sesi!);
+            lock (_kunciUbah)
+            {
+                var galeri = _galeri;
+                if (!galeri.Entri.IsEmpty && galeri.Dpi != sesi.Dpi)
+                {
+                    return Hasil.Galat(409, "DPI galeri berubah selagi pendaftaran berjalan. Ulangi pendaftaran jari ini.");
+                }
+                // Jari lain bisa saja terdaftar selagi sesi ini berjalan.
+                var mirip = JariLainTermirip(sesi, galeri);
+                if (mirip is not null)
+                {
+                    return JariSudahTerdaftar(sesi, mirip);
+                }
+                var versi = AwalanVersi + sesi.Dpi;
+                var rekaman = sesi.Calon.Select((t, i) => _brankas.Enkripsi(
+                    new Templat(sesi.Identitas, sesi.Jari, i + 1, versi, t.ToByteArray()))).ToArray();
+                var diganti = galeri.Entri.Any(x => x.Identitas == sesi.Identitas && x.Jari == sesi.Jari);
+                var entriBaru = galeri.Entri
+                    .Where(x => !(x.Identitas == sesi.Identitas && x.Jari == sesi.Jari))
+                    .Concat(rekaman.Select((r, i) => new Entri(sesi.Identitas, sesi.Jari, i + 1, sesi.Calon[i], r)))
+                    .ToImmutableArray();
+                TulisGaleri(entriBaru);
+                _galeri = new Galeri(sesi.Dpi, entriBaru);
+                if (sesi.Dpi != galeri.Dpi)
+                {
+                    _probeTerakhir = null;
+                    _log.LogWarning("DPI galeri mengikuti alat: {Dpi} (sebelumnya {Lama}).", sesi.Dpi, galeri.Dpi);
+                }
+                var mutu = MutuDari(sesi.Keserasian);
+                var tanda = _brankas.TandatanganiTerdaftar(permintaan.Tantangan!, sesi.Identitas, sesi.Jari, mutu);
+                _log.LogInformation("Terdaftar {Identitas}/{Jari}: mutu {Mutu}, {Tempelan} tempelan.", sesi.Identitas, sesi.Jari, mutu, sesi.Tempelan);
+                return Hasil.Oke(new
+                {
+                    status = "ok",
+                    perangkat = _brankas.Perangkat,
+                    identitas = sesi.Identitas,
+                    jari = sesi.Jari,
+                    tempelan = JumlahTempelan,
+                    mutu,
+                    diganti,
+                    dpi = sesi.Dpi,
+                    pesan = tanda.Pesan,
+                    tanda_tangan = tanda.Hmac,
+                });
+            }
+        }
+    }
+
+    public Hasil MulaiCabut(PermintaanMulaiCabut permintaan)
+    {
+        if (!Brankas.IdentitasResmi(permintaan.Identitas))
+        {
+            return Hasil.Galat(400, "Identitas tidak sah.");
+        }
+        var sesi = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+        lock (_kunciSesi)
+        {
+            BuangSesiLama(_sesiCabut, s => s.Dibuat);
+            _sesiCabut[sesi] = new SesiCabut(permintaan.Identitas!, Environment.TickCount64);
+        }
+        return Hasil.Oke(new { status = "ok", sesi, berlaku_detik = UmurSesiDetik });
+    }
+
+    // Menghapus semua templat satu orang, lalu menandatangani tanda terimanya
+    // dengan tantangan dari server. Orang yang memang tidak punya templat
+    // dijawab dengan jumlah 0, supaya catatan server tetap bisa dibereskan.
+    public Hasil Cabut(PermintaanCabut permintaan)
+    {
+        if (!Brankas.TantanganSah(permintaan.Tantangan))
+        {
+            return Hasil.Galat(400, "Tantangan tidak sah.");
+        }
+        lock (_kunciSesi)
+        {
+            // Sesi cabut sekali pakai: diambil dari daftar sebelum izinnya
+            // diperiksa.
+            if (!Brankas.TantanganSah(permintaan.Sesi) || !_sesiCabut.Remove(permintaan.Sesi!, out var sesi)
+                || Kedaluwarsa(sesi.Dibuat))
+            {
+                return SesiTidakAda();
+            }
+            if (!_brankas.IzinCabutSah(permintaan.Sesi!, sesi.Identitas, permintaan.Izin))
+            {
+                _log.LogWarning("Izin pencabutan {Identitas} tidak cocok.", sesi.Identitas);
+                return Hasil.Galat(403, "Izin dari server tidak cocok. Mulai lagi.");
+            }
+            // Pendaftaran orang itu yang masih berjalan ikut batal. Tanpa
+            // ini, sesi yang diizinkan sebelum pencabutan masih bisa
+            // menyimpan templatnya lagi sesudahnya.
+            foreach (var id in _sesiDaftar.Where(kv => kv.Value.Identitas == sesi.Identitas).Select(kv => kv.Key).ToArray())
+            {
+                _sesiDaftar.Remove(id);
+            }
+            lock (_kunciUbah)
+            {
+                var galeri = _galeri;
+                var sisa = galeri.Entri.Where(e => e.Identitas != sesi.Identitas).ToImmutableArray();
+                var tertolak = _rekamanTertolak.Where(r => r.Identitas != sesi.Identitas).ToImmutableArray();
+                var jumlah = galeri.Entri.Length - sisa.Length + _rekamanTertolak.Length - tertolak.Length;
+                if (jumlah > 0)
+                {
+                    // Memori baru diganti setelah penulisan berhasil. Kalau
+                    // penulisan gagal, pencabutan yang diulang masih melihat
+                    // rekaman yang sama dan menghapusnya.
+                    TulisGaleri(sisa, tertolak);
+                    _rekamanTertolak = tertolak;
+                    _galeri = new Galeri(galeri.Dpi, sisa);
+                }
+                // Tidak ada gambar yang perlu dibuang: _gambar hanya memuat
+                // identitas uji:.
+                var tanda = _brankas.TandatanganiDicabut(permintaan.Tantangan!, sesi.Identitas, Math.Min(jumlah, 99));
+                _log.LogWarning("Dicabut {Identitas}: {Jumlah} templat dihapus.", sesi.Identitas, jumlah);
+                return Hasil.Oke(new
+                {
+                    status = "ok",
+                    perangkat = _brankas.Perangkat,
+                    identitas = sesi.Identitas,
+                    jumlah = Math.Min(jumlah, 99),
+                    pesan = tanda.Pesan,
+                    tanda_tangan = tanda.Hmac,
+                });
+            }
+        }
+    }
+
+    // Keserasian tempelan-tempelan satu jari.
+    //   Keserasian[i]  skor terbaik tempelan i terhadap tempelan lain;
+    //   Terhubung      semua tempelan saling terjangkau lewat pasangan yang
+    //                  cocok 1:1. Empat tempelan yang hanya cocok berpasangan
+    //                  dua-dua tidak terhubung: jarinya diletakkan dengan dua
+    //                  cara yang tidak saling mengenali.
+    static (double[] Keserasian, bool Terhubung) NilaiKeserasian(IReadOnlyList<FingerprintTemplate> templat)
+    {
+        var n = templat.Count;
+        var skor = new double[n, n];
+        var keserasian = new double[n];
+        for (var i = 0; i < n; i++)
+        {
+            var pencocok = new FingerprintMatcher(templat[i]);
+            for (var j = 0; j < n; j++)
+            {
+                if (j != i)
+                {
+                    skor[i, j] = pencocok.Match(templat[j]);
+                    keserasian[i] = Math.Max(keserasian[i], skor[i, j]);
+                }
+            }
+        }
+        var terjangkau = new bool[n];
+        var antre = new Queue<int>();
+        terjangkau[0] = true;
+        antre.Enqueue(0);
+        while (antre.Count > 0)
+        {
+            var i = antre.Dequeue();
+            for (var j = 0; j < n; j++)
+            {
+                if (!terjangkau[j] && Math.Max(skor[i, j], skor[j, i]) >= AmbangSatuLawanSatu)
+                {
+                    terjangkau[j] = true;
+                    antre.Enqueue(j);
+                }
+            }
+        }
+        return (keserasian, terjangkau.All(t => t));
+    }
+
+    // Tempelan yang dibuang kalau gerbang belum lolos: yang keserasiannya
+    // terendah; kalau sama, yang paling lama.
+    static int TempelanTerlemah(double[] keserasian) => Array.IndexOf(keserasian, keserasian.Min());
+
+    static int MutuDari(double[] keserasian) => (int)Math.Clamp(Math.Floor(keserasian.Min()), 0, 9999);
+
+    // Jari terdaftar yang paling mirip dengan calon sesi ini, kalau skornya
+    // mencapai ambang 1:1: jari orang lain, atau jari lain orang yang sama.
+    // Jari yang sedang didaftarkan ulang tidak dihitung.
+    (string Identitas, string Jari, double Skor)? JariLainTermirip(SesiDaftar sesi, Galeri galeri)
+    {
+        (string Identitas, string Jari, double Skor)? terbaik = null;
+        foreach (var calon in sesi.Calon)
+        {
+            var pencocok = new FingerprintMatcher(calon);
+            foreach (var e in galeri.Entri.Where(x => !(x.Identitas == sesi.Identitas && x.Jari == sesi.Jari)))
+            {
+                var s = pencocok.Match(e.Templat);
+                if (s >= AmbangSatuLawanSatu && (terbaik is null || s > terbaik.Value.Skor))
+                {
+                    terbaik = (e.Identitas, e.Jari, s);
+                }
+            }
+        }
+        return terbaik;
+    }
+
+    // Penolakan ini dicatat sebagai peringatan, supaya sampai ke Event Viewer
+    // dan ambang 1:1 bisa ditinjau dari pendaftaran sungguhan: dua jari
+    // berbeda sesekali melewati ambang itu.
+    Hasil JariSudahTerdaftar(SesiDaftar sesi, (string Identitas, string Jari, double Skor)? mirip)
+    {
+        var m = mirip!.Value;
+        _log.LogWarning("Pendaftaran {Identitas}/{Jari} ditolak: mirip {IdentitasLain}/{JariLain}, skor {Skor:F1}.",
+                            sesi.Identitas, sesi.Jari, m.Identitas, m.Jari, m.Skor);
+        var pesan = m.Identitas == sesi.Identitas
+            ? $"Jari ini sudah terdaftar sebagai {m.Jari} milik orang yang sama. Pilih jari lain."
+            : $"Jari ini mirip jari yang sudah terdaftar atas nama {m.Identitas} (skor {Bulat(m.Skor)}). Tidak didaftarkan.";
+        return Hasil.Galat(409, pesan, new { tahap = "gagal", identitas_lain = m.Identitas, jari_lain = m.Jari, skor = Bulat(m.Skor) });
+    }
+
+    static bool Kedaluwarsa(long dibuat) => Environment.TickCount64 - dibuat > UmurSesiDetik * 1000L;
+
+    // Sesi pendaftaran yang masih berlaku, atau null. Bentuknya diperiksa
+    // dulu, supaya kiriman sembarang tidak dipakai sebagai kunci.
+    SesiDaftar? CariSesiDaftar(string? id)
+    {
+        if (!Brankas.TantanganSah(id) || !_sesiDaftar.TryGetValue(id!, out var sesi))
+        {
+            return null;
+        }
+        if (Kedaluwarsa(sesi.Dibuat))
+        {
+            _sesiDaftar.Remove(id!);
+            return null;
+        }
+        return sesi;
+    }
+
+    static Hasil SesiTidakAda() => Hasil.Galat(404, "Sesi tidak ada atau sudah kedaluwarsa. Mulai lagi.");
+
+    // Membuang sesi yang kedaluwarsa, lalu yang tertua selama golongannya masih
+    // penuh. Sesi yang ditinggalkan halaman tidak boleh menahan pendaftaran
+    // berikutnya. Tanpa golongan, semua sesi dihitung bersama.
+    static void BuangSesiLama<T>(Dictionary<string, T> sesi, Func<T, long> dibuat, Func<T, bool>? golongan = null)
+    {
+        foreach (var kunci in sesi.Where(kv => Kedaluwarsa(dibuat(kv.Value))).Select(kv => kv.Key).ToArray())
+        {
+            sesi.Remove(kunci);
+        }
+        while (true)
+        {
+            var segolongan = sesi.Where(kv => golongan is null || golongan(kv.Value)).ToArray();
+            if (segolongan.Length < MaksSesi)
+            {
+                return;
+            }
+            sesi.Remove(segolongan.MinBy(kv => dibuat(kv.Value)).Key);
         }
     }
 
@@ -581,25 +1080,44 @@ sealed class Pencocok
         });
     }
 
+    // Hanya menghapus identitas uji:. Galeri yang sama memuat pendaftaran
+    // siswa dan guru, dan itu tidak boleh ikut terhapus dari halaman uji.
     public Hasil HapusDataUji()
     {
+        int dihapus, sisaTemplat;
         lock (_kunciUbah)
         {
-            _brankas.TulisTemplat([]);
-            _rekamanTertolak = [];
-            _galeri = new Galeri(DpiBawaan, []);
+            var galeri = _galeri;
+            var sisa = galeri.Entri.Where(e => !Brankas.IdentitasUji(e.Identitas)).ToImmutableArray();
+            dihapus = galeri.Entri.Length - sisa.Length;
+            sisaTemplat = sisa.Length;
+            var tertolak = _rekamanTertolak.Where(r => !Brankas.IdentitasUji(r.Identitas)).ToImmutableArray();
+            TulisGaleri(sisa, tertolak);
+            _rekamanTertolak = tertolak;
+            _galeri = new Galeri(sisa.IsEmpty ? DpiBawaan : galeri.Dpi, sisa);
             _gambar.Clear();
             _probeTerakhir = null;
             _kembar.Kosongkan();
         }
-        _log.LogWarning("Semua data uji dihapus.");
-        return Hasil.Oke(new { status = "ok", message = "Semua templat, gambar di memori, dan catatan sampel dihapus." });
+        _log.LogWarning("Data uji dihapus: {Dihapus} templat. Templat siswa dan guru yang tersisa: {Sisa}.", dihapus, sisaTemplat);
+        return Hasil.Oke(new
+        {
+            status = "ok",
+            dihapus,
+            sisa = sisaTemplat,
+            message = "Semua templat uji, gambar di memori, dan catatan sampel dihapus."
+                      + (sisaTemplat > 0 ? $" {sisaTemplat} templat siswa dan guru tidak disentuh." : ""),
+        });
     }
 
     // Rekaman tertolak ikut ditulis kembali apa adanya, supaya tidak hilang
     // diam-diam saat galeri berubah.
-    void TulisGaleri(ImmutableArray<Entri> entri) =>
-        _brankas.TulisTemplat(entri.Select(e => e.Rekaman).Concat(_rekamanTertolak));
+    void TulisGaleri(ImmutableArray<Entri> entri) => TulisGaleri(entri, _rekamanTertolak);
+
+    // Untuk pemanggil yang juga mengurangi rekaman tertolak: keduanya ditulis
+    // dulu, dan memori baru diganti pemanggil setelah penulisannya berhasil.
+    void TulisGaleri(ImmutableArray<Entri> entri, ImmutableArray<RekamanTemplat> tertolak) =>
+        _brankas.TulisTemplat(entri.Select(e => e.Rekaman).Concat(tertolak));
 
     static FingerprintTemplate Ekstrak(Sampel sampel, int dpi)
     {
@@ -667,6 +1185,25 @@ sealed record Galeri(int Dpi, ImmutableArray<Entri> Entri);
 sealed record Entri(string Identitas, string Jari, int Urutan, FingerprintTemplate Templat, RekamanTemplat Rekaman);
 
 sealed record Probe(Sampel Sampel, FingerprintTemplate Templat, int Dpi);
+
+enum Tahap { MenungguIzin, Menangkap, MenungguUji, Lulus }
+
+// Satu sesi pendaftaran berizin. Calon berisi templat tempelan yang masih
+// dipakai; gambarnya sendiri tidak disimpan.
+sealed class SesiDaftar(string identitas, string jari)
+{
+    public string Identitas { get; } = identitas;
+    public string Jari { get; } = jari;
+    public long Dibuat { get; } = Environment.TickCount64;
+    public Tahap Tahap { get; set; } = Tahap.MenungguIzin;
+    public int Dpi { get; set; }
+    public List<FingerprintTemplate> Calon { get; } = [];
+    public int Tempelan { get; set; }
+    public int Uji { get; set; }
+    public double[] Keserasian { get; set; } = [];
+}
+
+sealed record SesiCabut(string Identitas, long Dibuat);
 
 // Sampel dari halaman yang sudah dibaca. Isi berisi piksel 8-bit baris demi
 // baris untuk format raw, atau berkas PNG untuk format png.
@@ -888,3 +1425,15 @@ sealed record PermintaanIdentifikasi(string? Format, string? Sampel, string? Tan
 sealed record PermintaanDaftar(string? Identitas, string? Jari, string? Format, string[]? Sampel);
 
 sealed record PermintaanKalibrasi(int? Terapkan);
+
+sealed record PermintaanMulaiDaftar(string? Identitas, string? Jari);
+
+sealed record PermintaanIzin(string? Sesi, string?[]? Izin);
+
+sealed record PermintaanTempel(string? Sesi, string? Format, string? Sampel);
+
+sealed record PermintaanSelesai(string? Sesi, string? Tantangan);
+
+sealed record PermintaanMulaiCabut(string? Identitas);
+
+sealed record PermintaanCabut(string? Sesi, string?[]? Izin, string? Tantangan);
