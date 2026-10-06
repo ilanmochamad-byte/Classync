@@ -504,18 +504,25 @@ if (!function_exists('sjWajibAdmin')) {
     // menjawab 401 atau 403 lalu berhenti.
     //
     // Sesi tidak dimulai untuk permintaan tanpa cookie sesi, supaya kiriman
-    // dari luar tidak dibalas dengan cookie baru. Sesinya hanya dibaca lalu
-    // langsung dilepas, supaya permintaan lain dari halaman yang sama tidak
-    // menunggu kuncinya.
+    // dari luar tidak dibalas dengan cookie baru. Sesinya dibaca lalu langsung
+    // ditutup, supaya permintaan lain dari halaman yang sama tidak menunggu
+    // kuncinya.
+    //
+    // Ditutup dengan session_write_close(), bukan dibuka dengan
+    // 'read_and_close': yang kedua tidak memperbarui cap waktu sesi. Halaman
+    // pendaftaran bisa berjam-jam hanya memanggil endpoint ini tanpa memuat
+    // halaman lain, dan tanpa pembaruan itu sesi admin habis di tengah
+    // pendaftaran walaupun adminnya terus bekerja.
     function sjWajibAdmin($isi) {
         $masuk = false;
         $admin_id = 0;
         $csrf = '';
         if (isset($_COOKIE[session_name()]) && session_status() !== PHP_SESSION_ACTIVE) {
-            session_start(['read_and_close' => true]);
+            session_start();
             $masuk = isset($_SESSION['admin_logged_in']);
             $admin_id = (int)($_SESSION['admin_id'] ?? 0);
             $csrf = $_SESSION['sidik_jari_csrf'] ?? '';
+            session_write_close();
         }
         if (!$masuk || $admin_id <= 0) {
             sjKirim(401, ['status' => 'error', 'message' => 'Sesi admin berakhir. Masuk lagi ke panel admin.', 'perlu_masuk' => true]);
