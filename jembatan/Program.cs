@@ -15,8 +15,9 @@
 //   preflight;
 // - tidak ada rute yang mengembalikan templat atau gambar, dan tidak ada rute
 //   yang menandatangani isi kiriman pemanggil;
-// - sebagai layanan, yang dibuka hanya /status dan /detak. Halaman uji dan
-//   rute prototipe 4.1 hanya ada kalau jembatan dijalankan di jendela konsol.
+// - sebagai layanan, yang dibuka hanya /status, /detak, dan rute pendaftaran
+//   berizin. Halaman uji dan rute prototipe 4.1 hanya ada kalau jembatan
+//   dijalankan di jendela konsol.
 //
 // Argumen. Untuk layanan Windows argumen ditulis di binPath, yang hanya bisa
 // diubah admin:
@@ -278,8 +279,48 @@ rute.Post("/detak", Asal.HalamanSendiri | Asal.Kiosk, async (HttpRequest permint
     });
 });
 
+// Pendaftaran dan pencabutan berizin, dari halaman admin di situs kiosk.
+// Dibuka juga untuk layanan: tanpa izin bertanda tangan server tidak ada
+// templat yang disimpan atau dihapus, dan izin itu hanya diberikan server
+// kepada admin yang sedang login.
+rute.Post("/daftar/mulai", Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanMulaiDaftar>(permintaan);
+    return galat ?? Kirim(pencocok.MulaiDaftar(isi!));
+});
+rute.Post("/daftar/izin", Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanIzin>(permintaan);
+    return galat ?? Kirim(pencocok.IzinkanDaftar(isi!));
+});
+rute.Post("/daftar/tempel", Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanTempel>(permintaan);
+    // PNG hanya untuk uji di luar PC kiosk. Layanan, dan susunan rute layanan
+    // dalam mode pengembangan, hanya menerima raw seperti kiriman alatnya.
+    return galat ?? Kirim(pencocok.Tempel(isi!, pngBoleh: arg.Pengembangan && !hanyaRuteLayanan));
+});
+rute.Post("/daftar/selesai", Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanSelesai>(permintaan);
+    return galat ?? Kirim(pencocok.SelesaiDaftar(isi!));
+});
+rute.Post("/cabut/mulai", Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanMulaiCabut>(permintaan);
+    return galat ?? Kirim(pencocok.MulaiCabut(isi!));
+});
+rute.Post("/cabut", Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanCabut>(permintaan);
+    return galat ?? Kirim(pencocok.Cabut(isi!));
+});
+
 // Rute prototipe 4.1, hanya dari halaman uji jembatan sendiri dan hanya di
-// jendela konsol. Identifikasi baru dibuka untuk halaman kiosk di 4.4.
+// jendela konsol. /daftar dan /hapus-uji hanya menyentuh identitas uji:, dan
+// /kalibrasi menolak mengubah galeri yang memuat templat siswa atau guru.
+// /identifikasi tetap mencocokkan seluruh galeri; ia baru dibuka untuk
+// halaman kiosk di 4.4.
 if (!hanyaRuteLayanan)
 {
     rute.Get("/galeri", Asal.HalamanSendiri, () => Results.Json(pencocok.IsiGaleri()));
