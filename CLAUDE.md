@@ -340,8 +340,8 @@ pantau belum ada laporan yang membaca `status_harian`. Yang masih menunggu:
 - **Sebelas berkas laporan pindah ke `status_harian`,** satu per satu,
   termasuk dua di repo API. Tanggal sebelum aturan ini berlaku tetap memakai
   logika lama.
-- **Sidik jarinya sendiri.** Fondasinya sudah ada, lihat "Absensi sidik jari:
-  jembatan, tantangan, dan detak kiosk" di bawah. Pendaftaran jari dan absen
+- **Sidik jarinya sendiri.** Fondasi dan pendaftaran jarinya sudah ada, lihat
+  "Absensi sidik jari: jembatan, tantangan, dan detak kiosk" di bawah. Absen
   lewat sidik jari belum dibuka.
 
 Terverifikasi di produksi 28 September 2026:
@@ -379,21 +379,26 @@ Tabel dan kolomnya dibuat manual di phpMyAdmin, jadi tidak ada di repo:
 Pekerjaan sidik jarinya sendiri dibagi lima sub-langkah, dan nomornya dipakai
 di README jembatan dan di kode: 4.1 prototipe jembatan, 4.2 fondasi server,
 4.3 pendaftaran jari, 4.4 kiosk berdampingan dengan QR/NISN, dan 4.5
-peralihan. Yang sudah ada di repo adalah 4.1 (PR #18–#22) dan 4.2: sisi
-server di PR #23, jembatan 0.2.0 di PR #24, dan detak dari halaman kiosk di
-PR #25.
+peralihan. Yang sudah ada di repo:
+
+- 4.1 (PR #18–#22);
+- 4.2: sisi server di PR #23, jembatan 0.2.0 di PR #24, dan detak dari
+  halaman kiosk di PR #25;
+- 4.3: sisi server di PR #27, jembatan 0.3.0 di PR #28, lalu halaman
+  pendaftarannya.
 
 **Absen lewat sidik jari belum dibuka.** Alur QR/NISN di `absen-siswa.php`
-dan `api/proses_absen_siswa.php` tidak berubah. Yang ada baru detak: bukti
-bahwa halaman kiosk, jembatan, dan server saling mengenali.
+dan `api/proses_absen_siswa.php` tidak berubah. Yang ada baru dua hal: detak,
+bukti bahwa halaman kiosk, jembatan, dan server saling mengenali; dan
+pendaftaran jari dari panel admin.
 
 **Tiga bagian, dan jembatan tidak ikut deploy.**
 
 | Bagian | Berkas | Sampai ke tempatnya lewat |
 |---|---|---|
 | jembatan | `jembatan/`, layanan Windows di PC kiosk yang hanya mendengar di `127.0.0.1:47890` | `.exe` yang dibangun di Mac lalu disalin lewat USB; `.cpanel.yml` tidak menyalin folder itu |
-| server | `includes/sidik_jari.php`, `api/sj_tantangan.php`, `api/sj_detak.php`, `admin/kiosk_sidik_jari.php` | deploy biasa |
-| halaman kiosk | `includes/sj_detak_klien.php`, di-include `absen-siswa.php` | deploy biasa |
+| server | `includes/sidik_jari.php`; untuk detak `api/sj_tantangan.php`, `api/sj_detak.php`, `admin/kiosk_sidik_jari.php`; untuk pendaftaran `admin/sj_izin.php`, `admin/sj_catat.php`, `admin/sidik_jari.php` | deploy biasa |
+| halaman | `includes/sj_detak_klien.php`, di-include `absen-siswa.php`; `includes/sj_tangkap_klien.php`, di-include `admin/sidik_jari.php` | deploy biasa |
 
 Jembatan mencocokkan sidik jari dan menandatangani hasilnya dengan HMAC,
 memakai kunci per kiosk. Ia tidak pernah menghubungi server sendiri: halaman
@@ -551,22 +556,90 @@ Belum teruji:
 - **Tiga pemeriksaan akun standar** di fase C README jembatan. Hasilnya
   belum dilaporkan.
 
-Yang masih menunggu sesudah 4.2:
+**Pendaftaran jari (4.3)** dikerjakan admin di `admin/sidik_jari.php` (Data →
+Pendaftaran Sidik Jari), yang dibuka di Chrome PC kiosk. Halaman yang sama
+dipakai dari komputer mana pun untuk mencatat persetujuan.
 
-- **4.3, pendaftaran jari.** Uji 5 Oktober memenuhi kriteria aman dan waktu,
-  tetapi pengenalan pada tempelan pertama baru 82,8% dari syarat 90%.
-  Syarat perbaikannya ada di README jembatan, "Kriteria lanjut ke 4.2":
-  gerbang mutu saat mendaftar, dua jari terbaik per orang, dan aturan
-  keserasian yang lebih ketat.
+- **Templat hanya ada di PC kiosk.** Server tidak menyimpan salinannya. Yang
+  dicatat server: persetujuan (`persetujuan_sidik_jari`), dan jari mana yang
+  terdaftar di perangkat mana (`pendaftaran_sidik_jari`). Kalau folder data
+  jembatan hilang, semua jari didaftarkan ulang.
+- **Izinnya berjalan terbalik dari detak.** Jembatan yang menerbitkan
+  tantangan, dan server yang menandatanganinya dengan kunci perangkat:
+  1. jembatan membuka sesi untuk satu orang dan satu jari;
+  2. `admin/sj_izin.php` menandatangani
+     `SJ1|izin-daftar|<perangkat>|<sesi>|<identitas>|<jari>`, atau
+     `SJ1|izin-cabut|<perangkat>|<sesi>|<identitas>`;
+  3. jembatan memeriksa izin itu, menyimpan atau menghapus templat, lalu
+     menandatangani tanda terima (`terdaftar` atau `dicabut`) atas tantangan
+     dari server;
+  4. `admin/sj_catat.php` memeriksa tanda terima itu dan mencatatnya.
+
+  Kedua arah memakai kunci yang sama, jadi jenis pesannya yang memisahkan:
+  server hanya menandatangani `izin-*`, dan jembatan tidak pernah.
+- **Catatan pendaftaran hanya ditulis dari tanda terima jembatan.**
+  Tantangannya sekali pakai, dan pemakaiannya satu transaksi dengan
+  pencatatannya. Jadi isi `pendaftaran_sidik_jari` mengikuti apa yang terjadi
+  di jembatan, bukan apa yang dikatakan halaman.
+- **Yang boleh didaftarkan:** siswa yang belum lulus dan guru yang punya
+  jadwal piket Aktif, dan hanya kalau persetujuannya tercatat `setuju`. Izin
+  cabut tidak memeriksa itu, supaya templat alumni atau orang yang menarik
+  persetujuannya tetap bisa dicabut. Mereka tampil di daftar "Perlu dicabut".
+- **Dua jari per orang:** kedua telunjuk dulu, jari tengah sebagai pengganti.
+  Gerbang mutu, tempelan uji, dan ambangnya dihitung jembatan; angkanya ada
+  di README jembatan, "Ambang".
+- **Kedua endpoint menuntut sesi admin dan token CSRF halaman itu.** Sesinya
+  ditutup dengan `session_write_close()`, bukan dibuka dengan
+  `read_and_close`. Yang kedua tidak memperbarui cap waktu sesi, sedangkan
+  halaman pendaftaran bisa berjam-jam hanya memanggil kedua endpoint ini:
+  sesi admin habis di tengah pendaftaran walaupun adminnya terus bekerja.
+  Ini ditemukan saat menyusun uji halaman, sebelum sempat terjadi di
+  produksi.
+- **Halaman baru menyentuh `127.0.0.1` kalau izin `loopback-network` sudah
+  `granted`, atau setelah tombol "Hubungkan" diklik.** Alasannya sama dengan
+  skrip detak: di komputer lain, permintaan itu memunculkan permintaan izin.
+  Pustaka WebSDK juga baru dimuat saat itu.
+- **Penangkapan ada di `includes/sj_tangkap_klien.php`,** dipindahkan dari
+  halaman uji jembatan, dan akan dipakai lagi halaman kiosk di 4.4. Aturan
+  yang ditemukan di PC kiosk tertulis di komentar berkasnya: hanya Raw,
+  perintah ke ADC berantrean dan dibatasi 5 detik, dan penangkapan dimulai
+  lagi setelah jendela aktif kembali.
+- **Templat bisa tersimpan di jembatan tanpa tercatat di server,** kalau
+  tanda terimanya tidak sampai: server putus, sesi admin habis, atau
+  halamannya ditutup. Untuk galat sementara halaman menawarkan kirim ulang.
+  Selain itu jarinya didaftarkan ulang, dan itu menggantikan templat lamanya.
+  Baris "Templat" di bagian PC kiosk membandingkan jumlah templat di jembatan
+  dengan catatan server setiap halaman dimuat.
+- **Penolakan "jari terlalu mirip" bisa keliru.** Ambang jari ganda 40, dan
+  pada uji 5 Oktober dua jari milik orang berbeda pernah mendapat 45,8.
+  Ambangnya sengaja dibiarkan (6 Oktober 2026) dan ditinjau setelah
+  pendaftaran guru piket. Tiap penolakan tercatat di Event Viewer PC kiosk,
+  sumber `JembatanSidikJari`.
+
+Seluruh 4.3 belum teruji di produksi saat catatan ini ditulis. Yang paling
+perlu dilihat di PC kiosk:
+
+- memperbarui jembatan ke 0.3.0 di atas layanan yang sedang berjalan;
+- penangkapan lewat WebSDK dari halaman admin. Dari alamat produksi baru
+  terbukti satu permintaan ke ADC (5 Oktober); penangkapannya sendiri baru
+  terbukti dari halaman uji jembatan;
+- sampel pembaca sungguhan lewat sesi berizin, dan gerbang mutu pada jari
+  siswa. Angkanya dihitung dari enam orang dewasa.
+
+Yang masih menunggu sesudah 4.3:
+
 - **4.4, kiosk berdampingan dengan QR/NISN.** Layar kiosk tidak boleh mati,
   detak memuat keadaan pembaca menurut ADC, dan tingkat pengenalan diukur
   ulang dengan siswa.
 - **4.5, peralihan.**
 
-Kedua tabelnya dibuat manual di phpMyAdmin, jadi tidak ada di repo. Keduanya
-membersihkan diri sendiri: `tantangan_kiosk` hanya menyimpan tantangan yang
-sudah dipakai, selama sehari, dan `detak_kiosk` satu baris per detak selama
-60 hari.
+Keempat tabelnya dibuat manual di phpMyAdmin, jadi tidak ada di repo. Dua
+yang pertama membersihkan diri sendiri: `tantangan_kiosk` hanya menyimpan
+tantangan yang sudah dipakai, selama sehari, dan `detak_kiosk` satu baris per
+detak selama 60 hari. Dua yang terakhir tidak. Di `pendaftaran_sidik_jari`,
+kolom `aktif` bernilai 1 untuk baris aktif dan NULL untuk yang lain, supaya
+kunci unik `satu_aktif` menjaga paling banyak satu baris aktif per orang,
+jari, dan perangkat.
 
     CREATE TABLE tantangan_kiosk (
       tantangan CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -578,6 +651,24 @@ sudah dipakai, selama sehari, dan `detak_kiosk` satu baris per detak selama
       perangkat VARCHAR(32) NOT NULL, alat TINYINT NOT NULL,
       versi VARCHAR(64) NOT NULL DEFAULT '',
       PRIMARY KEY (id), KEY perangkat_waktu (perangkat, waktu));
+    CREATE TABLE persetujuan_sidik_jari (
+      identitas VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+      status ENUM('setuju','menolak') NOT NULL, tanggal_surat DATE NULL,
+      keterangan VARCHAR(150) NOT NULL DEFAULT '', admin_id INT NOT NULL,
+      dicatat DATETIME NOT NULL, tidak_terbaca DATETIME NULL, tidak_terbaca_admin INT NULL,
+      PRIMARY KEY (identitas));
+    CREATE TABLE pendaftaran_sidik_jari (
+      id INT NOT NULL AUTO_INCREMENT,
+      identitas VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+      jari VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+      perangkat VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+      mutu SMALLINT UNSIGNED NOT NULL, terdaftar DATETIME NOT NULL, admin_id INT NOT NULL,
+      status ENUM('aktif','diganti','dicabut') NOT NULL DEFAULT 'aktif',
+      aktif TINYINT NULL DEFAULT 1, diubah DATETIME NULL, diubah_admin INT NULL,
+      PRIMARY KEY (id), UNIQUE KEY satu_aktif (identitas, jari, perangkat, aktif),
+      KEY status (status, identitas),
+      CONSTRAINT aktif_sesuai_status CHECK ((status = 'aktif' AND aktif IS NOT NULL AND aktif = 1)
+                                         OR (status <> 'aktif' AND aktif IS NULL)));
 
 ## Temuan audit
 
