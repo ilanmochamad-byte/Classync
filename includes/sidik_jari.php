@@ -397,9 +397,9 @@ if (!function_exists('sjPesanAbsen')) {
 if (!function_exists('sjPesanTolak')) {
     // Tanda terima jembatan untuk tempelan yang tidak dikenali. Tidak memuat
     // identitas, hanya skor kandidat terbaiknya: integer 0 sampai 9999.
-    // $tantangan terbitan server untuk tujuan absen, sama dengan pesan absen,
-    // jadi satu tantangan hanya menghasilkan salah satu dari keduanya. null
-    // kalau ada kolom yang tidak sah.
+    // $tantangan terbitan server untuk tujuan absen, sama dengan pesan absen.
+    // Jembatan tidak mengingat tantangan; sjPakaiTantangan() yang membuat
+    // hanya satu dari keduanya tercatat. null kalau ada kolom yang tidak sah.
     function sjPesanTolak($perangkat, $tantangan, $skor) {
         if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || !sjBentukBilangan($skor, 9999)) {
             return null;
