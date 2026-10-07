@@ -405,7 +405,9 @@ static IResult Galat(int kode, string pesan) =>
 static IResult Kirim(Hasil hasil) => Results.Json(hasil.Isi, statusCode: hasil.Kode);
 
 // Isi kiriman JSON, atau jawaban galat yang siap dikirim. Kiriman lebih dari
-// batas Kestrel (2 MB) dijawab 413.
+// batas Kestrel (2 MB) dijawab 413. Charset yang tidak dikenal .NET di
+// Content-Type membuat pembacanya melempar InvalidOperationException; tanpa
+// ditangkap, jawabannya 500 dan tiap permintaan menulis satu galat ke log.
 static async Task<(T? Isi, IResult? Galat)> BacaJson<T>(HttpRequest permintaan) where T : class
 {
     try
@@ -416,6 +418,10 @@ static async Task<(T? Isi, IResult? Galat)> BacaJson<T>(HttpRequest permintaan) 
     catch (JsonException)
     {
         return (null, Galat(StatusCodes.Status400BadRequest, "Kiriman bukan JSON yang sah."));
+    }
+    catch (InvalidOperationException)
+    {
+        return (null, Galat(StatusCodes.Status400BadRequest, "Kiriman tidak bisa dibaca."));
     }
     catch (Microsoft.AspNetCore.Http.BadHttpRequestException e)
     {
