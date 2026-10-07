@@ -5,15 +5,22 @@
 // dengan HMAC-SHA256 memakai kunci per perangkat. Berkas ini sisi servernya:
 // menyusun ulang pesan yang sama, mencocokkan tanda tangannya, dan memastikan
 // setiap tantangan hanya dipakai sekali. Pemakainya: detak kiosk
-// (api/sj_tantangan.php dan api/sj_detak.php) dan pendaftaran jari
-// (admin/sj_izin.php, admin/sj_catat.php, dan admin/sidik_jari.php).
+// (api/sj_tantangan.php dan api/sj_detak.php), pendaftaran jari
+// (admin/sj_izin.php, admin/sj_catat.php, dan admin/sidik_jari.php), dan
+// absen lewat sidik jari (api/sj_absen.php).
 //
 // Pesan kanonik, sama persis dengan jembatan/Brankas.cs. Yang ditandatangani
 // jembatan dan diperiksa server:
 //   SJ1|absen|<perangkat>|<tantangan>|<identitas>|<skor>
+//   SJ1|tolak|<perangkat>|<tantangan>|<skor>
 //   SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>
+//   SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>|adc:<0 atau 1>
 //   SJ1|terdaftar|<perangkat>|<tantangan>|<identitas>|<jari>|<mutu>
 //   SJ1|dicabut|<perangkat>|<tantangan>|<identitas>|<jumlah>
+// tolak adalah tanda terima untuk tempelan yang tidak dikenali. Detak
+// berbentuk kedua ditandatangani jembatan 0.4.0 ke atas kalau halaman kiosk
+// melaporkan keadaan pembaca menurut ADC kepadanya; bentuk pertama tetap
+// diterima.
 // Yang ditandatangani server dan diperiksa jembatan, dengan kunci perangkat
 // yang sama:
 //   SJ1|izin-daftar|<perangkat>|<tantangan jembatan>|<identitas>|<jari>
@@ -35,6 +42,12 @@
 // Keduanya berupa daftar supaya bisa dirotasi tanpa deploy: tambahkan yang
 // baru, alihkan, lalu cabut yang lama. Rahasia pertama dipakai menerbitkan
 // tantangan; semua yang terdaftar diterima saat memeriksa.
+//
+// Berkas yang sama memuat saklar absen lewat sidik jari:
+//   $sj_absen_kiosk = true;
+// Selama baris itu tidak ada, atau nilainya bukan true, tidak ada tantangan
+// absen yang diterbitkan dan api/sj_absen.php menolak semua kiriman.
+// Perubahannya berlaku seketika, tanpa deploy.
 //
 // Tantangan tidak disimpan saat diterbitkan. Isinya 32 byte (64 hex): waktu
 // terbit, 12 byte acak, dan tanda dari rahasia server atas tujuan dan
@@ -69,6 +82,12 @@ if (!defined('SJ_SIMPAN_DETAK_HARI')) {
     // Baris detak_kiosk yang lebih tua dari ini dihapus saat detak berikutnya
     // datang, supaya tabelnya tidak tumbuh tanpa batas.
     define('SJ_SIMPAN_DETAK_HARI', 60);
+}
+
+if (!defined('SJ_SIMPAN_LOG_ABSEN_HARI')) {
+    // Baris log_absen_sidik_jari yang lebih tua dari ini dihapus saat tempelan
+    // berikutnya dicatat.
+    define('SJ_SIMPAN_LOG_ABSEN_HARI', 60);
 }
 
 // ---------- Bentuk kolom ----------
@@ -141,9 +160,11 @@ if (!function_exists('sjBentukBilangan')) {
 if (!function_exists('sjKonfigurasi')) {
     // Mengembalikan
     //   ['rahasia' => [biner, ...],
-    //    'perangkat' => [id => ['aktif' => bool, 'kunci' => [biner, ...]], ...]]
+    //    'perangkat' => [id => ['aktif' => bool, 'kunci' => [biner, ...]], ...],
+    //    'absen_kiosk' => bool]
     // atau null kalau berkasnya tidak terbaca atau tidak memuat satu pun
-    // rahasia tantangan yang sah.
+    // rahasia tantangan yang sah. 'absen_kiosk' hanya benar kalau berkasnya
+    // memuat $sj_absen_kiosk = true.
     //
     // Entri yang bentuknya salah dilewati. Penjelasannya masuk ke $masalah,
     // untuk ditampilkan di panel admin; isi kunci tidak pernah ikut. Tidak
@@ -159,6 +180,7 @@ if (!function_exists('sjKonfigurasi')) {
         }
         $sj_rahasia_tantangan = null;
         $sj_perangkat = null;
+        $sj_absen_kiosk = null;
         // Keluaran berkas itu dibuang: BOM atau baris kosong yang ikut
         // tersimpan dari penyunting akan merusak jawaban JSON.
         ob_start();
@@ -215,7 +237,14 @@ if (!function_exists('sjKonfigurasi')) {
             }
             $perangkat[$id] = ['aktif' => ($entri['aktif'] ?? false) === true, 'kunci' => $kunci];
         }
-        return ['rahasia' => $rahasia, 'perangkat' => $perangkat];
+
+        // Hanya true yang menyalakan. Nilai lain, misalnya 1 atau 'ya',
+        // dianggap mati dan dilaporkan, supaya saklarnya tidak menyala karena
+        // salah ketik.
+        if ($sj_absen_kiosk !== null && !is_bool($sj_absen_kiosk)) {
+            $masalah[] = '$sj_absen_kiosk harus true atau false; dianggap false.';
+        }
+        return ['rahasia' => $rahasia, 'perangkat' => $perangkat, 'absen_kiosk' => $sj_absen_kiosk === true];
     }
 }
 
@@ -337,11 +366,20 @@ if (!function_exists('sjPakaiTantangan')) {
 
 if (!function_exists('sjPesanDetak')) {
     // null kalau ada kolom yang tidak sah. $alat harus integer 0 atau 1.
-    function sjPesanDetak($perangkat, $tantangan, $alat) {
-        if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || ($alat !== 0 && $alat !== 1)) {
+    //
+    // $adc adalah keadaan pembaca menurut ADC, seperti dilaporkan halaman
+    // kiosk kepada jembatan: integer 0 atau 1, atau null kalau tidak
+    // dilaporkan. Dengan null pesannya berbentuk lama, tanpa bagian adc.
+    function sjPesanDetak($perangkat, $tantangan, $alat, $adc = null) {
+        if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || ($alat !== 0 && $alat !== 1)
+            || ($adc !== null && $adc !== 0 && $adc !== 1)) {
             return null;
         }
-        return implode('|', [SJ_VERSI_PESAN, 'detak', $perangkat, $tantangan, 'alat:' . $alat]);
+        $bagian = [SJ_VERSI_PESAN, 'detak', $perangkat, $tantangan, 'alat:' . $alat];
+        if ($adc !== null) {
+            $bagian[] = 'adc:' . $adc;
+        }
+        return implode('|', $bagian);
     }
 }
 
@@ -353,6 +391,20 @@ if (!function_exists('sjPesanAbsen')) {
             return null;
         }
         return implode('|', [SJ_VERSI_PESAN, 'absen', $perangkat, $tantangan, $identitas, $skor]);
+    }
+}
+
+if (!function_exists('sjPesanTolak')) {
+    // Tanda terima jembatan untuk tempelan yang tidak dikenali. Tidak memuat
+    // identitas, hanya skor kandidat terbaiknya: integer 0 sampai 9999.
+    // $tantangan terbitan server untuk tujuan absen, sama dengan pesan absen,
+    // jadi satu tantangan hanya menghasilkan salah satu dari keduanya. null
+    // kalau ada kolom yang tidak sah.
+    function sjPesanTolak($perangkat, $tantangan, $skor) {
+        if (!sjBentukPerangkat($perangkat) || !sjBentukTantangan($tantangan) || !sjBentukBilangan($skor, 9999)) {
+            return null;
+        }
+        return implode('|', [SJ_VERSI_PESAN, 'tolak', $perangkat, $tantangan, $skor]);
     }
 }
 
@@ -446,19 +498,47 @@ if (!function_exists('sjTandaIzin')) {
 if (!function_exists('sjCatatDetak')) {
     // Satu baris per detak yang sah. $versi hanya keterangan dari halaman
     // kiosk dan tidak ikut ditandatangani.
-    function sjCatatDetak($conn, $perangkat, $alat, $versi) {
+    //
+    // $adc (0, 1, atau null kalau tidak dilaporkan) masuk ke kolom adc, yang
+    // ditambahkan di sub-langkah 4.4. Kalau kolom itu belum dibuat (galat
+    // 1054), detaknya tetap dicatat tanpa adc: kolom yang terlupa tidak boleh
+    // membuat kiosk tampak diam. Halaman pantau yang melaporkan kolomnya
+    // belum ada. Mengembalikan adc yang benar-benar tersimpan: 0, 1, atau null.
+    function sjCatatDetak($conn, $perangkat, $alat, $versi, $adc = null) {
         $kini = date('Y-m-d H:i:s');
         $versi = is_string($versi) && preg_match('/\A[0-9A-Za-z.+-]{1,64}\z/', $versi) === 1 ? $versi : '';
-        $stmt = $conn->prepare("INSERT INTO detak_kiosk (waktu, perangkat, alat, versi) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param('ssis', $kini, $perangkat, $alat, $versi);
-        $stmt->execute();
-        $stmt->close();
+        $tercatat = false;
+        if ($adc === 0 || $adc === 1) {
+            try {
+                $stmt = $conn->prepare("INSERT INTO detak_kiosk (waktu, perangkat, alat, versi, adc) VALUES (?, ?, ?, ?, ?)");
+                if ($stmt === false) {
+                    if ($conn->errno !== 1054) {
+                        throw new RuntimeException('Detak tidak bisa dicatat (galat ' . $conn->errno . ').');
+                    }
+                } else {
+                    $stmt->bind_param('ssisi', $kini, $perangkat, $alat, $versi, $adc);
+                    $tercatat = $stmt->execute();
+                    $stmt->close();
+                }
+            } catch (mysqli_sql_exception $e) {
+                if ($e->getCode() !== 1054) {
+                    throw $e;
+                }
+            }
+        }
+        if (!$tercatat) {
+            $stmt = $conn->prepare("INSERT INTO detak_kiosk (waktu, perangkat, alat, versi) VALUES (?, ?, ?, ?)");
+            $stmt->bind_param('ssis', $kini, $perangkat, $alat, $versi);
+            $stmt->execute();
+            $stmt->close();
+        }
 
         $batas = date('Y-m-d H:i:s', time() - SJ_SIMPAN_DETAK_HARI * 86400);
         $stmt = $conn->prepare("DELETE FROM detak_kiosk WHERE perangkat = ? AND waktu < ? LIMIT 500");
         $stmt->bind_param('ss', $perangkat, $batas);
         $stmt->execute();
         $stmt->close();
+        return $tercatat ? $adc : null;
     }
 }
 
@@ -481,7 +561,13 @@ if (!function_exists('sjIsiPermintaan')) {
     // dijawab langsung: 405 untuk metode lain, 413 untuk kiriman di atas
     // $maks_byte, 400 untuk yang bukan objek JSON. Daftar kosong [] tidak
     // terbedakan dari objek kosong {} dan diperlakukan sama.
-    function sjIsiPermintaan($maks_byte = 4096) {
+    //
+    // $kedalaman diteruskan ke json_decode(): 2 berarti objek datar, tanpa
+    // larik atau objek di dalamnya. Endpoint yang menerima kiriman besar harus
+    // mengisinya. JSON yang bersarang dalam memakan memori seratus kali
+    // ukurannya saat diurai, dan itu terjadi sebelum tanda tangan diperiksa:
+    // orang luar bisa menghabiskan memori dan memenuhi error_log dengannya.
+    function sjIsiPermintaan($maks_byte = 4096, $kedalaman = 512) {
         if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
             header('Allow: POST');
             sjKirim(405, ['status' => 'error', 'message' => 'Hanya menerima POST.']);
@@ -490,7 +576,7 @@ if (!function_exists('sjIsiPermintaan')) {
         if ($mentah === false || strlen($mentah) > $maks_byte) {
             sjKirim(413, ['status' => 'error', 'message' => 'Kiriman terlalu besar.']);
         }
-        $isi = json_decode($mentah, true);
+        $isi = json_decode($mentah, true, $kedalaman);
         if (!is_array($isi) || ($isi !== [] && array_is_list($isi))) {
             sjKirim(400, ['status' => 'error', 'message' => 'Kiriman harus berupa objek JSON.']);
         }
@@ -642,6 +728,51 @@ if (!function_exists('sjTandaiTidakTerbaca')) {
         $kini = date('Y-m-d H:i:s');
         $stmt = $conn->prepare("UPDATE persetujuan_sidik_jari SET tidak_terbaca = ?, tidak_terbaca_admin = ? WHERE identitas = ? AND status = 'setuju'");
         $stmt->bind_param('sis', $kini, $admin_id, $identitas);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+// ---------- Absen lewat sidik jari ----------
+//
+// Jembatan menandatangani hasil identifikasinya: pesan absen kalau jarinya
+// dikenali, pesan tolak kalau tidak. api/sj_absen.php memeriksa tanda tangan
+// itu, lalu mencatat setiap tempelan di log_absen_sidik_jari. Absensinya
+// sendiri dicatat catatAbsenSiswa() di includes/absen_siswa.php.
+
+if (!function_exists('sjPendaftaranAktif')) {
+    // Jumlah jari orang itu yang tercatat aktif di perangkat itu. Nol berarti
+    // templatnya ada di jembatan tanpa catatan di server, misalnya karena
+    // tanda terima pendaftarannya tidak pernah sampai.
+    function sjPendaftaranAktif($conn, $identitas, $perangkat) {
+        $stmt = $conn->prepare("SELECT COUNT(*) FROM pendaftaran_sidik_jari WHERE identitas = ? AND perangkat = ? AND aktif = 1");
+        $stmt->bind_param('ss', $identitas, $perangkat);
+        $stmt->execute();
+        $jumlah = (int)$stmt->get_result()->fetch_row()[0];
+        $stmt->close();
+        return $jumlah;
+    }
+}
+
+if (!function_exists('sjCatatLogAbsen')) {
+    // Satu baris per tempelan yang tanda tangannya sah.
+    //   $identitas   null untuk tempelan yang tidak dikenali
+    //   $hasil       'masuk', 'pulang', 'ditolak', 'tidak_dikenali', atau
+    //                'bukan_siswa'
+    //   $keterangan  kode alasan untuk 'ditolak', misalnya 'belum_jam_pulang'
+    // Panggil hanya setelah tanda tangan perangkat sah, supaya tabel ini tidak
+    // bisa diisi tanpa kunci perangkat.
+    function sjCatatLogAbsen($conn, $perangkat, $identitas, $skor, $hasil, $keterangan = '') {
+        $kini = date('Y-m-d H:i:s');
+        $keterangan = substr((string)$keterangan, 0, 150);
+        $stmt = $conn->prepare("INSERT INTO log_absen_sidik_jari (waktu, perangkat, identitas, skor, hasil, keterangan) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param('sssiss', $kini, $perangkat, $identitas, $skor, $hasil, $keterangan);
+        $stmt->execute();
+        $stmt->close();
+
+        $batas = date('Y-m-d H:i:s', time() - SJ_SIMPAN_LOG_ABSEN_HARI * 86400);
+        $stmt = $conn->prepare("DELETE FROM log_absen_sidik_jari WHERE waktu < ? LIMIT 500");
+        $stmt->bind_param('s', $batas);
         $stmt->execute();
         $stmt->close();
     }
