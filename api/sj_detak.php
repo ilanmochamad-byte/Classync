@@ -9,11 +9,17 @@
 //
 // Kiriman: POST JSON
 //   {"perangkat": "kiosk-xxxxxx", "tantangan": "<64 hex>", "alat": 0 atau 1,
-//    "tanda_tangan": "<64 hex>", "versi": "<versi jembatan, boleh kosong>"}
-// Jawaban: {"status": "ok", "waktu": "<waktu server>"}.
+//    "tanda_tangan": "<64 hex>", "versi": "<versi jembatan, boleh kosong>",
+//    "adc": 0 atau 1, boleh tidak ada}
+// Jawaban: {"status": "ok", "waktu": "<waktu server>", "adc": 0, 1, atau null}.
 //
 // Pesan yang diperiksa disusun server sendiri dari perangkat, tantangan, dan
 // alat. versi hanya keterangan dan tidak ikut ditandatangani.
+//
+// adc adalah keadaan pembaca menurut ADC, yang dilaporkan halaman kiosk kepada
+// jembatan. Nilainya hanya dicatat kalau ikut ditandatangani. Jembatan lama
+// menandatangani pesan tanpa adc; detaknya tetap diterima, dan adc dicatat
+// sebagai tidak dilaporkan. Jawaban memuat adc yang benar-benar dicatat.
 //
 // Terbuka untuk umum. Basis data baru dibuka setelah tanda tangannya terbukti
 // sah, jadi kiriman tanpa kunci perangkat tidak pernah sampai ke sana.
@@ -28,8 +34,9 @@ $perangkat = $isi['perangkat'] ?? null;
 $tantangan = $isi['tantangan'] ?? null;
 $alat = $isi['alat'] ?? null;
 $tanda_tangan = $isi['tanda_tangan'] ?? null;
+$adc = $isi['adc'] ?? null;
 $pesan = sjPesanDetak($perangkat, $tantangan, $alat);
-if ($pesan === null || !sjBentukTandaTangan($tanda_tangan)) {
+if ($pesan === null || !sjBentukTandaTangan($tanda_tangan) || ($adc !== null && $adc !== 0 && $adc !== 1)) {
     sjKirim(400, ['status' => 'error', 'message' => 'Kiriman detak tidak lengkap atau bentuknya salah.']);
 }
 
@@ -49,8 +56,14 @@ if ($keadaan === 'kedaluwarsa') {
 if ($keadaan !== 'sah') {
     sjKirim(403, ['status' => 'error', 'message' => 'Tantangan bukan terbitan server ini untuk detak perangkat itu.']);
 }
-if (!sjTandaTanganSah($entri, $pesan, $tanda_tangan)) {
-    sjKirim(403, ['status' => 'error', 'message' => 'Tanda tangan tidak cocok dengan kunci perangkat di server.']);
+// Bentuk baru dicoba lebih dulu: adc ikut ditandatangani. Kalau tidak cocok,
+// tanda tangannya diperiksa terhadap bentuk lama, dan adc kiriman dibuang.
+$adc_bertanda = $adc !== null && sjTandaTanganSah($entri, sjPesanDetak($perangkat, $tantangan, $alat, $adc), $tanda_tangan);
+if (!$adc_bertanda) {
+    if (!sjTandaTanganSah($entri, $pesan, $tanda_tangan)) {
+        sjKirim(403, ['status' => 'error', 'message' => 'Tanda tangan tidak cocok dengan kunci perangkat di server.']);
+    }
+    $adc = null;
 }
 
 // includes/db.php berhenti sendiri dengan teks biasa kalau konfigurasinya
@@ -68,10 +81,10 @@ try {
     if (!sjPakaiTantangan($conn, $tantangan, 'detak', $perangkat)) {
         sjKirim(409, ['status' => 'error', 'message' => 'Tantangan sudah pernah dipakai.']);
     }
-    sjCatatDetak($conn, $perangkat, $alat, $isi['versi'] ?? '');
+    $adc = sjCatatDetak($conn, $perangkat, $alat, $isi['versi'] ?? '', $adc);
 } catch (Throwable $e) {
     error_log('[sj_detak] detak ' . $perangkat . ' tidak tercatat: ' . get_class($e) . ': ' . $e->getMessage());
     sjKirim(500, ['status' => 'error', 'message' => 'Detak tidak bisa dicatat.']);
 }
 
-sjKirim(200, ['status' => 'ok', 'waktu' => date('Y-m-d H:i:s')]);
+sjKirim(200, ['status' => 'ok', 'waktu' => date('Y-m-d H:i:s'), 'adc' => $adc]);
