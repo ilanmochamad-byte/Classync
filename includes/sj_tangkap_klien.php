@@ -2,10 +2,10 @@
 // sj_tangkap_klien.php — penangkapan sidik jari lewat HID Authentication
 // Device Client (ADC), untuk halaman yang dibuka di Chrome PC kiosk.
 //
-// Di-include halaman yang memerlukannya: sekarang admin/sidik_jari.php, nanti
-// halaman kiosk (4.4). Isinya satu objek, window.SjTangkap. Logikanya
-// dipindahkan dari halaman uji jembatan (jembatan/wwwroot/uji.html), tempat
-// aturan-aturan ini ditemukan lewat uji di PC kiosk:
+// Di-include halaman yang memerlukannya: admin/sidik_jari.php, dan halaman
+// kiosk lewat sj_absen_klien.php. Isinya satu objek, window.SjTangkap.
+// Logikanya dipindahkan dari halaman uji jembatan (jembatan/wwwroot/uji.html),
+// tempat aturan-aturan ini ditemukan lewat uji di PC kiosk:
 // - Hanya format Raw yang diminta, dan format tiap sampel diperiksa. Sampel
 //   berformat lain memicu mulai ulang; kalau dua kali tidak menolong, halaman
 //   diminta dimuat ulang.
