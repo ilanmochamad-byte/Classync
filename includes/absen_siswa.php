@@ -2,13 +2,17 @@
 // absen_siswa.php — mencatat absen masuk dan absen pulang siswa di kiosk.
 //
 // Aturannya ada di sini: kapan absen masuk diterima, empat penolakan absen
-// pulang, dan isi WA untuk orang tua. Pemakainya api/sj_absen.php (absen lewat
-// sidik jari).
+// pulang, dan isi WA untuk orang tua. Pemakainya dua:
+// - api/proses_absen_siswa.php (QR/NISN, dari kiosk dan dari aplikasi),
+//   dengan mode 'masuk' atau 'pulang' yang dipilih di layar;
+// - api/sj_absen.php (absen lewat sidik jari), dengan mode 'otomatis'.
+// Jadi perubahan aturan cukup dikerjakan di sini.
 //
-// api/proses_absen_siswa.php (QR/NISN, dipakai kiosk dan aplikasi) masih
-// memuat salinan aturan yang sama. Isi berkas ini dipindahkan dari sana tanpa
-// mengubah pesan, urutan pemeriksaan, atau bentuk datanya. Sampai endpoint itu
-// memanggil berkas ini, perubahan aturan harus dikerjakan di kedua tempat.
+// Pesan dan bentuk datanya dipindahkan dari api/proses_absen_siswa.php tanpa
+// diubah. Aplikasi menampilkan pesannya apa adanya dan membaca
+// data.nama_siswa serta data.kelas, dan versi lamanya hanya bisa diperbaiki
+// lewat rilis toko. Sebelum mengubah keduanya, periksa app/absen-siswa.tsx di
+// ~/ClassyncApp.
 //
 // Butuh includes/db.php dan includes/kalender_sekolah.php lebih dulu.
 
@@ -18,8 +22,9 @@ if (!function_exists('simpanFotoAbsenSiswa')) {
     // dibuat di sini. Dari pemanggil hanya NISN yang ikut, dan hanya huruf,
     // angka, garis bawah, dan tanda hubungnya.
     //
-    // Isi fotonya tidak diperiksa, sama dengan api/proses_absen_siswa.php.
-    // Pemanggil yang menerima foto dari luar memeriksanya sendiri lebih dulu.
+    // Isi fotonya tidak diperiksa di sini. api/sj_absen.php memeriksanya
+    // sendiri lebih dulu. api/proses_absen_siswa.php menyimpannya apa adanya,
+    // seperti sebelum aturan ini dipindahkan.
     function simpanFotoAbsenSiswa($base64, $awalan, $nisn, $tanggal) {
         if (!is_string($base64)) {
             return null;
