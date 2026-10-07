@@ -14,10 +14,12 @@
 // - POST wajib application/json, supaya kiriman lintas asal selalu melewati
 //   preflight;
 // - tidak ada rute yang mengembalikan templat atau gambar, dan tidak ada rute
-//   yang menandatangani isi kiriman pemanggil;
-// - sebagai layanan, yang dibuka hanya /status, /detak, dan rute pendaftaran
-//   berizin. Halaman uji dan rute prototipe 4.1 hanya ada kalau jembatan
-//   dijalankan di jendela konsol.
+//   yang menandatangani isi sembarang: bentuk pesannya tetap. Dari kiriman
+//   pemanggil, yang masuk ke pesan tanpa izin server hanya tantangan dan, di
+//   /detak, adc yang bernilai 0 atau 1;
+// - sebagai layanan, yang dibuka hanya /status, /detak, /identifikasi untuk
+//   halaman kiosk, dan rute pendaftaran berizin. Halaman uji dan rute
+//   prototipe 4.1 hanya ada kalau jembatan dijalankan di jendela konsol.
 //
 // Argumen. Untuk layanan Windows argumen ditulis di binPath, yang hanya bisa
 // diubah admin:
@@ -254,6 +256,12 @@ rute.Get("/status", Asal.HalamanSendiri | Asal.Kiosk, () => Results.Json(new
 
 // Detak kiosk: status alat menurut pemeriksaan jembatan sendiri, bukan
 // menurut halaman, ditandatangani bersama tantangan dari pemanggil.
+//
+// adc berbeda: itu keadaan pembaca menurut ADC, yang hanya diketahui halaman.
+// Jembatan meneruskannya apa adanya ke dalam pesan bertanda tangan, sebagai
+// kolom tersendiri, supaya di server terlihat kalau Windows masih melihat
+// alatnya sedangkan halaman tidak bisa menangkap jari. Halaman yang tidak
+// mengirim adc mendapat pesan berbentuk lama.
 rute.Post("/detak", Asal.HalamanSendiri | Asal.Kiosk, async (HttpRequest permintaan) =>
 {
     var (isi, galat) = await BacaJson<PermintaanDetak>(permintaan);
@@ -265,18 +273,57 @@ rute.Post("/detak", Asal.HalamanSendiri | Asal.Kiosk, async (HttpRequest permint
     {
         return Galat(StatusCodes.Status400BadRequest, "Tantangan tidak sah.");
     }
+    bool? adc = null;
+    if (isi.Adc is { ValueKind: not JsonValueKind.Null } nilaiAdc)
+    {
+        // Hanya bilangan 0 atau 1. Teks "1" dan true ditolak, supaya yang
+        // diteruskan halaman ke server sama dengan yang ditandatangani.
+        if (nilaiAdc.ValueKind != JsonValueKind.Number || !nilaiAdc.TryGetInt32(out var angkaAdc) || angkaAdc is not (0 or 1))
+        {
+            return Galat(StatusCodes.Status400BadRequest, "adc harus bilangan 0 atau 1.");
+        }
+        adc = angkaAdc == 1;
+    }
     var alat = cekAlat.Periksa();
     var terhubung = alat.Terhubung == true;
-    var tanda = brankas.TandatanganiDetak(isi.Tantangan!, terhubung);
+    var tanda = brankas.TandatanganiDetak(isi.Tantangan!, terhubung, adc);
     return Results.Json(new
     {
         status = "ok",
         perangkat = brankas.Perangkat,
         alat = terhubung ? 1 : 0,
         keterangan_alat = alat.Keterangan,
+        // null kalau halaman tidak melaporkannya. Halaman meneruskan nilai
+        // ini, bukan nilai kirimannya sendiri, ke server.
+        adc = adc is bool siap ? (siap ? 1 : 0) : (int?)null,
         pesan = tanda.Pesan,
         tanda_tangan = tanda.Hmac,
     });
+});
+
+// Identifikasi. Dari halaman kiosk: hasilnya ditandatangani untuk
+// api/sj_absen.php, dikenali maupun tidak, dan hanya templat siswa dan guru
+// yang dicocokkan. Dibuka juga untuk layanan, karena halaman kiosk
+// membutuhkannya. Tanpa tantangan dari server tanda tangannya tidak berguna,
+// tetapi skor dan identitas di jawabannya tetap terbaca pemanggil. Batas itu
+// ditulis di README, "Identifikasi dari halaman kiosk".
+//
+// Dari halaman uji jembatan sendiri, yang hanya ada di jendela konsol:
+// diagnostik prototipe 4.1, atas seluruh galeri termasuk identitas uji:.
+rute.Post("/identifikasi", hanyaRuteLayanan ? Asal.Kiosk : Asal.HalamanSendiri | Asal.Kiosk, async (HttpRequest permintaan) =>
+{
+    var (isi, galat) = await BacaJson<PermintaanIdentifikasi>(permintaan);
+    if (galat is not null)
+    {
+        return galat;
+    }
+    // Jawaban diagnostik hanya untuk halaman uji jembatan sendiri di jendela
+    // konsol. Semua yang lain mendapat jawaban kiosk, supaya layanan tidak
+    // pernah melayani diagnostik walau aturan asal rute ini kelak berubah.
+    // PNG hanya untuk uji di luar PC kiosk, sama dengan /daftar/tempel.
+    return !hanyaRuteLayanan && PenjagaAsal.Dari(permintaan.HttpContext) == Asal.HalamanSendiri
+        ? Kirim(pencocok.Identifikasi(isi!))
+        : Kirim(pencocok.IdentifikasiKiosk(isi!, pngBoleh: arg.Pengembangan && !hanyaRuteLayanan));
 });
 
 // Pendaftaran dan pencabutan berizin, dari halaman admin di situs kiosk.
@@ -319,16 +366,9 @@ rute.Post("/cabut", Asal.Kiosk, async (HttpRequest permintaan) =>
 // Rute prototipe 4.1, hanya dari halaman uji jembatan sendiri dan hanya di
 // jendela konsol. /daftar dan /hapus-uji hanya menyentuh identitas uji:, dan
 // /kalibrasi menolak mengubah galeri yang memuat templat siswa atau guru.
-// /identifikasi tetap mencocokkan seluruh galeri; ia baru dibuka untuk
-// halaman kiosk di 4.4.
 if (!hanyaRuteLayanan)
 {
     rute.Get("/galeri", Asal.HalamanSendiri, () => Results.Json(pencocok.IsiGaleri()));
-    rute.Post("/identifikasi", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
-    {
-        var (isi, galat) = await BacaJson<PermintaanIdentifikasi>(permintaan);
-        return galat ?? Kirim(pencocok.Identifikasi(isi!));
-    });
     rute.Post("/daftar", Asal.HalamanSendiri, async (HttpRequest permintaan) =>
     {
         var (isi, galat) = await BacaJson<PermintaanDaftar>(permintaan);
@@ -405,7 +445,9 @@ static IResult Galat(int kode, string pesan) =>
 static IResult Kirim(Hasil hasil) => Results.Json(hasil.Isi, statusCode: hasil.Kode);
 
 // Isi kiriman JSON, atau jawaban galat yang siap dikirim. Kiriman lebih dari
-// batas Kestrel (2 MB) dijawab 413.
+// batas Kestrel (2 MB) dijawab 413. Charset yang tidak dikenal .NET di
+// Content-Type membuat pembacanya melempar InvalidOperationException; tanpa
+// ditangkap, jawabannya 500 dan tiap permintaan menulis satu galat ke log.
 static async Task<(T? Isi, IResult? Galat)> BacaJson<T>(HttpRequest permintaan) where T : class
 {
     try
@@ -416,6 +458,10 @@ static async Task<(T? Isi, IResult? Galat)> BacaJson<T>(HttpRequest permintaan) 
     catch (JsonException)
     {
         return (null, Galat(StatusCodes.Status400BadRequest, "Kiriman bukan JSON yang sah."));
+    }
+    catch (InvalidOperationException)
+    {
+        return (null, Galat(StatusCodes.Status400BadRequest, "Kiriman tidak bisa dibaca."));
     }
     catch (Microsoft.AspNetCore.Http.BadHttpRequestException e)
     {
@@ -442,6 +488,13 @@ static class PenjagaAsal
 {
     public const string AsalKiosk = "https://smkt.alhasan.co.id";
 
+    static readonly object KunciAsal = new();
+
+    // Asal permintaan yang sudah lolos Periksa(): halaman sendiri atau kiosk.
+    // 0 untuk permintaan tanpa Origin, yang hanya mungkin GET. Untuk rute yang
+    // melayani kedua asal dengan cara berbeda.
+    public static Asal Dari(HttpContext ctx) => ctx.Items.TryGetValue(KunciAsal, out var asal) && asal is Asal a ? a : 0;
+
     // null berarti permintaan boleh lanjut ke rutenya. asalKiosk selalu
     // AsalKiosk, kecuali dalam mode pengembangan dengan --asal-kiosk.
     public static Jawaban? Periksa(HttpContext ctx, int port, PetaRute rute, string asalKiosk)
@@ -464,6 +517,7 @@ static class PenjagaAsal
             {
                 return new Jawaban(StatusCodes.Status403Forbidden, "Asal permintaan tidak diizinkan.");
             }
+            ctx.Items[KunciAsal] = asal;
             if (asal == Asal.Kiosk)
             {
                 ctx.Response.Headers.AccessControlAllowOrigin = origin;
@@ -623,7 +677,9 @@ sealed class CekAlat(ILogger log)
 // Terhubung null berarti tidak bisa diperiksa.
 sealed record StatusAlat(bool? Terhubung, int Jumlah, string Keterangan);
 
-sealed record PermintaanDetak(string? Tantangan);
+// Adc dibaca sebagai JSON mentah, supaya bentuknya bisa diperiksa sendiri:
+// pembaca JSON bawaan menerima teks "1" sebagai bilangan.
+sealed record PermintaanDetak(string? Tantangan, JsonElement? Adc);
 
 sealed record Argumen(int Port, string? Data, bool Pengembangan, bool Pasangan, string? AsalKiosk, bool RuteLayanan)
 {
