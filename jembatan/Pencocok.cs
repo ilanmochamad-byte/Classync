@@ -3,7 +3,9 @@
 // Halaman mengirim sampel dari HID Authentication Device Client apa adanya.
 // Berkas ini membacanya, mengekstrak templat dengan SourceAFIS, lalu
 // mencocokkannya dengan semua templat di galeri. Hasil yang diterima
-// ditandatangani Brankas sebagai "absen".
+// ditandatangani Brankas sebagai "absen". Untuk halaman kiosk, hasil yang
+// tidak diterima juga ditandatangani, sebagai "tolak": tanpa tanda terima itu
+// server tidak boleh mencatat tempelan yang gagal.
 //
 // Aturan yang dipegang:
 // - Galeri hanya berisi templat, dimuat dari templat.json yang terenkripsi.
@@ -230,15 +232,7 @@ sealed class Pencocok
         var waktuEkstraksi = Stopwatch.GetElapsedTime(mulai) - waktuBaca;
 
         var pencocok = new FingerprintMatcher(probe);
-        var skor = new Dictionary<string, double>(StringComparer.Ordinal);
-        foreach (var e in galeri.Entri)
-        {
-            var s = pencocok.Match(e.Templat);
-            if (!skor.TryGetValue(e.Identitas, out var lama) || s > lama)
-            {
-                skor[e.Identitas] = s;
-            }
-        }
+        var (teratas, diterima) = Cocokkan(pencocok, galeri.Entri);
         var waktuCocok = Stopwatch.GetElapsedTime(mulai) - waktuBaca - waktuEkstraksi;
 
         // Diagnostik prototipe: kemiripan dengan tempelan sebelumnya, untuk
@@ -248,10 +242,8 @@ sealed class Pencocok
             ? Bulat(pencocok.Match(sebelumnya.Templat))
             : null;
 
-        var teratas = skor.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).Take(2).ToArray();
         var terbaik = teratas[0];
         var kedua = teratas.Length > 1 ? teratas[1].Value : (double?)null;
-        var diterima = terbaik.Value >= Ambang && (kedua is null || terbaik.Value - kedua.Value >= Selisih);
         var tanda = diterima
             ? _brankas.TandatanganiAbsen(permintaan.Tantangan!, terbaik.Key, (int)Math.Min(Math.Floor(terbaik.Value), 9999), hanyaResmi: false)
             : null;
@@ -276,6 +268,107 @@ sealed class Pencocok
             pesan = tanda?.Pesan,
             tanda_tangan = tanda?.Hmac,
         });
+    }
+
+    // Identifikasi untuk halaman kiosk. Hasilnya selalu ditandatangani atas
+    // tantangan dari server: pesan absen kalau jarinya dikenali, pesan tolak
+    // kalau tidak. Tanda terima tolak yang membuat server boleh mencatat
+    // tempelan yang gagal; dari situ tingkat pengenalan diukur.
+    //
+    // Bedanya dari Identifikasi(), yang melayani halaman uji:
+    // - yang dicocokkan hanya templat siswa dan guru. Templat uji: yang
+    //   tertinggal di galeri tidak boleh menang, dan tidak boleh ikut dihitung
+    //   sebagai identitas kedua;
+    // - jawabannya tanpa daftar kandidat dan tanpa diagnostik, dan identitas
+    //   hanya disebut kalau diterima;
+    // - probenya tidak disimpan di memori.
+    // pngBoleh hanya benar dalam mode pengembangan; di PC kiosk hanya raw.
+    public Hasil IdentifikasiKiosk(PermintaanIdentifikasi permintaan, bool pngBoleh)
+    {
+        var mulai = Stopwatch.GetTimestamp();
+        if (!Brankas.TantanganSah(permintaan.Tantangan))
+        {
+            return Hasil.Galat(400, "Tantangan tidak sah.");
+        }
+        if (!pngBoleh && !string.Equals(permintaan.Format, "raw", StringComparison.Ordinal))
+        {
+            return Hasil.Galat(400, "Identifikasi di kiosk hanya menerima sampel raw.");
+        }
+        Sampel sampel;
+        try
+        {
+            sampel = Sampel.Baca(permintaan.Format, permintaan.Sampel);
+        }
+        catch (SampelTidakSahException e)
+        {
+            return Hasil.Galat(400, e.Message);
+        }
+
+        var galeri = _galeri;
+        var resmi = galeri.Entri.Where(e => Brankas.IdentitasResmi(e.Identitas)).ToArray();
+        if (resmi.Length == 0)
+        {
+            return Hasil.Galat(409, "Belum ada jari yang terdaftar.");
+        }
+        if (!_kembar.Tandai(sampel.Sidik))
+        {
+            return Hasil.Galat(409, "Sampel ini sama persis dengan sampel sebelumnya. Tempelkan jari lagi.");
+        }
+
+        FingerprintTemplate probe;
+        try
+        {
+            probe = Ekstrak(sampel, galeri.Dpi);
+        }
+        catch (SampelTidakSahException e)
+        {
+            return Hasil.Galat(400, e.Message);
+        }
+
+        var (teratas, diterima) = Cocokkan(new FingerprintMatcher(probe), resmi);
+        var terbaik = teratas[0];
+        // Skor yang ditandatangani berupa bilangan bulat, dibulatkan ke bawah.
+        // Jawabannya memuat bilangan yang sama, supaya halaman meneruskannya
+        // ke server tanpa mengubahnya.
+        var skor = (int)Math.Clamp(Math.Floor(terbaik.Value), 0, 9999);
+        var tanda = diterima
+            ? _brankas.TandatanganiAbsen(permintaan.Tantangan!, terbaik.Key, skor, hanyaResmi: true)
+            : _brankas.TandatanganiTolak(permintaan.Tantangan!, skor);
+        var total = Stopwatch.GetElapsedTime(mulai);
+
+        _log.LogInformation("Identifikasi kiosk: {Hasil}, skor {Skor:F1}, {Total:F0} ms.",
+                            diterima ? "diterima " + terbaik.Key : "tidak dikenali", terbaik.Value, total.TotalMilliseconds);
+        return Hasil.Oke(new
+        {
+            status = "ok",
+            diterima,
+            identitas = diterima ? terbaik.Key : null,
+            skor,
+            perangkat = _brankas.Perangkat,
+            waktu_ms = Ms(total),
+            pesan = tanda.Pesan,
+            tanda_tangan = tanda.Hmac,
+        });
+    }
+
+    // Skor terbaik tiap identitas, dua identitas teratas, dan keputusannya:
+    // diterima kalau yang terbaik mencapai Ambang dan unggul Selisih atas
+    // identitas kedua. Dipakai halaman uji dan halaman kiosk, supaya aturannya
+    // tidak bisa berbeda di antara keduanya. entri tidak boleh kosong.
+    static (KeyValuePair<string, double>[] Teratas, bool Diterima) Cocokkan(FingerprintMatcher pencocok, IEnumerable<Entri> entri)
+    {
+        var skor = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var e in entri)
+        {
+            var s = pencocok.Match(e.Templat);
+            if (!skor.TryGetValue(e.Identitas, out var lama) || s > lama)
+            {
+                skor[e.Identitas] = s;
+            }
+        }
+        var teratas = skor.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).Take(2).ToArray();
+        var diterima = teratas[0].Value >= Ambang && (teratas.Length < 2 || teratas[0].Value - teratas[1].Value >= Selisih);
+        return (teratas, diterima);
     }
 
     // Pendaftaran uji, hanya dari halaman uji di jendela konsol dan hanya
