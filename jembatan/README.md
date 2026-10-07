@@ -6,11 +6,16 @@ mengirimkannya ke jembatan ini. Jembatan mencocokkannya 1:N dengan SourceAFIS
 dan menandatangani hasilnya dengan HMAC, supaya server bisa memastikan
 absensi itu benar-benar datang dari kiosk.
 
-Status per 0.3.0: prototipe 4.1 sudah diuji di PC kiosk dengan relawan dewasa,
+Status per 0.4.0: prototipe 4.1 sudah diuji di PC kiosk dengan relawan dewasa,
 dan sejak 6 Oktober 2026 kiosk dipasangkan dengan server dan mengirim detak
-bertanda tangan (sub-langkah 4.2). Mulai versi ini jari siswa dan guru piket
-bisa didaftarkan dan dicabut dari panel admin, dengan izin server (4.3).
-Absensi lewat sidik jari belum dibuka: kiosknya dikerjakan di 4.4.
+bertanda tangan (sub-langkah 4.2). Sejak 0.3.0 jari siswa dan guru piket bisa
+didaftarkan dan dicabut dari panel admin, dengan izin server (4.3). Mulai
+versi ini layanan juga melayani identifikasi dari halaman kiosk, dan detak
+bisa memuat keadaan pembaca menurut ADC (4.4).
+
+Absensi lewat sidik jari tetap belum dibuka. Halaman kiosk yang memakainya
+belum ada, dan server baru menerimanya setelah sakelar di berkas
+konfigurasinya dinyalakan.
 
 Folder ini tidak ikut deploy: `.cpanel.yml` tidak menyalinnya ke server.
 
@@ -21,7 +26,7 @@ Folder ini tidak ikut deploy: `.cpanel.yml` tidak menyalinnya ke server.
 | `JembatanSidikJari.csproj`, `packages.lock.json` | Proyek .NET 10. Semua paket dipin dan dikunci beserta hash isinya. |
 | `Program.cs` | Pintu masuk: layanan/konsol, Kestrel di `127.0.0.1:47890`, penjaga Host/Origin/CORS, rute, cek alat lewat WMI, dan perintah `--pasangan`. |
 | `Brankas.cs` | Kunci perangkat dan sidiknya, tanda tangan HMAC, pemeriksaan izin dari server, dan enkripsi templat. |
-| `Pencocok.cs` | Membaca sampel, ekstraksi SourceAFIS, identifikasi 1:N, pendaftaran dan pencabutan berizin, gerbang mutu, kalibrasi, ukur waktu. |
+| `Pencocok.cs` | Membaca sampel, ekstraksi SourceAFIS, identifikasi 1:N untuk halaman kiosk dan halaman uji, pendaftaran dan pencabutan berizin, gerbang mutu, kalibrasi, ukur waktu. |
 | `wwwroot/uji.html` | Halaman uji di `http://127.0.0.1:47890/`, tertanam di dalam `.exe`. Hanya disajikan kalau jembatan dijalankan di jendela konsol. |
 | `pasang-layanan.ps1`, `hapus-layanan.ps1` | Memasang dan mencabut layanan Windows. |
 | `kebijakan-chrome.reg`, `cabut-kebijakan-chrome.reg` | Mengizinkan dan mencabut akses halaman kiosk ke 127.0.0.1 di Chrome/Edge. |
@@ -90,7 +95,7 @@ paket dibuat:
 Get-FileHash .\jembatan-sidik-jari.exe -Algorithm SHA256
 ```
 
-Versi `.exe` yang sedang jalan berbentuk `0.3.0+<commit>`. Versi itu tampil di
+Versi `.exe` yang sedang jalan berbentuk `0.4.0+<commit>`. Versi itu tampil di
 keluaran `pasang-layanan.ps1`, di `http://127.0.0.1:47890/status`, dan di panel
 admin setelah detak pertama. Bangun paket dari folder kerja yang bersih, yaitu
 setelah semua perubahan di-commit, supaya commit itu memang isi paketnya.
@@ -118,7 +123,7 @@ Kerjakan dengan akun admin, di luar jam kiosk.
 
    Skrip yang sama dipakai untuk memperbarui `.exe`: layanan lama dihentikan
    dan diganti, sedangkan kunci dan templat di folder data dibiarkan. Di
-   keluarannya, baris "Versi" harus berawalan `0.3.0` dan "Mode" harus
+   keluarannya, baris "Versi" harus berawalan `0.4.0` dan "Mode" harus
    `layanan`.
 2. **Tampilkan pasangannya.** Masih di PowerShell admin:
 
@@ -158,9 +163,9 @@ Kunci HMAC itu rahasia, setara password kiosk: jangan difoto, dikirim lewat
 pesan, atau disimpan di Git. Sidik kunci, yang delapan karakter, bukan
 rahasia.
 
-Sebagai layanan, jembatan hanya membuka `/status`, `/detak`, dan rute
-pendaftaran berizin. Alamat `http://127.0.0.1:47890/` menampilkan halaman
-ringkas, bukan halaman uji.
+Sebagai layanan, jembatan hanya membuka `/status`, `/detak`, `/identifikasi`
+untuk halaman kiosk, dan rute pendaftaran berizin. Alamat
+`http://127.0.0.1:47890/` menampilkan halaman ringkas, bukan halaman uji.
 
 Sejak kiosk dipasangkan, `hapus-layanan.ps1 -HapusData` ikut menghapus kunci
 yang dikenal server. Sesudah itu kiosk harus dipasangkan ulang, dan semua jari
@@ -183,7 +188,19 @@ tidak perlu dipasangkan ulang dan sidik kuncinya tetap. Sesudahnya:
 
 - baris "Versi" di keluaran skrip harus berawalan versi yang baru. Kolom
   "Versi jembatan" di panel admin ikut berganti setelah detak berikutnya;
-- "Uji rantai" di panel admin harus tetap hijau sampai baris terakhir.
+- "Uji rantai" di panel admin harus tetap hijau sampai baris terakhir;
+- sejak 0.4.0, rute identifikasi harus terbuka untuk halaman kiosk. Dari
+  PowerShell di PC kiosk:
+
+  ```powershell
+  curl.exe -sS -i -X POST -H "Origin: https://smkt.alhasan.co.id" -H "Content-Type: application/json" -d "{}" http://127.0.0.1:47890/identifikasi
+  ```
+
+  Baris pertama jawabannya harus `HTTP/1.1 400 Bad Request`, dan isinya
+  memuat "Tantangan tidak sah.": permintaannya sampai ke pencocok, lalu
+  ditolak karena memang tanpa tantangan. Jawaban `403 Forbidden` berarti yang
+  berjalan masih jembatan sebelum 0.4.0, atau alamat di `Origin` salah ketik.
+  Galat sambungan dari `curl` berarti layanannya tidak berjalan.
 
 Jangan menjalankan `hapus-layanan.ps1 -HapusData` untuk memperbarui.
 
@@ -267,7 +284,8 @@ lagi saat PC dipakai. Selama itu detak tetap melaporkan alat terpasang, karena
 jembatan memeriksa alat lewat Windows, bukan lewat ADC. Layar yang mati karena
 hemat daya adalah dugaan terkuatnya, dan uji terkendalinya belum dilakukan.
 Untuk 4.4: layar kiosk tidak boleh mati, dan detak harus ikut memuat keadaan
-pembaca menurut ADC.
+pembaca menurut ADC. Sejak 0.4.0 jembatan menerima keadaan itu dari halaman
+dan ikut menandatanganinya (lihat "Detak ke server").
 
 ### Fase A: driver, ADC, dan jembatan di jendela konsol
 
@@ -550,7 +568,8 @@ ditolak sebelum diproses, permintaan tanpa Origin hanya boleh GET, POST wajib
 |---|---|---|---|
 | `GET /` | halaman sendiri | ada | Di jendela konsol: halaman uji. Sebagai layanan: halaman ringkas. |
 | `GET /status` | halaman sendiri, kiosk | ada | Versi, mode, ID perangkat, sidik kunci, waktu PC, alat menurut WMI, ringkasan galeri. |
-| `POST /detak` | halaman sendiri, kiosk | ada | Detak bertanda tangan dengan status alat. |
+| `POST /detak` | halaman sendiri, kiosk | ada | Detak bertanda tangan dengan status alat, dan dengan keadaan pembaca menurut ADC kalau halaman melaporkannya. |
+| `POST /identifikasi` | kiosk; di jendela konsol juga halaman sendiri | ada | Identifikasi 1:N. Untuk kiosk: hasilnya ditandatangani, dikenali maupun tidak. Untuk halaman uji: diagnostik prototipe, dan hanya hasil yang diterima yang ditandatangani. |
 | `GET /galeri` | halaman sendiri | tidak | Daftar identitas dan jari terdaftar, tanpa templat. |
 | `POST /daftar/mulai` | kiosk | ada | Membuka sesi pendaftaran satu jari. Jawabannya tantangan sekali pakai. |
 | `POST /daftar/izin` | kiosk | ada | Menerima izin bertanda tangan server untuk sesi itu. |
@@ -559,7 +578,6 @@ ditolak sebelum diproses, permintaan tanpa Origin hanya boleh GET, POST wajib
 | `POST /cabut/mulai` | kiosk | ada | Membuka sesi pencabutan untuk satu orang. |
 | `POST /cabut` | kiosk | ada | Dengan izin server: menghapus templat orang itu dan menandatangani tanda terimanya. |
 | `POST /daftar` | halaman sendiri | tidak | Pendaftaran uji, hanya identitas `uji:`: empat tempelan satu jari. |
-| `POST /identifikasi` | halaman sendiri | tidak | Identifikasi 1:N, hasil yang diterima ditandatangani. |
 | `POST /kalibrasi` | halaman sendiri | tidak | Skor per DPI, atau menerapkan DPI baru. |
 | `POST /ukur` | halaman sendiri | tidak | Waktu pencocokan untuk galeri 50–2000 templat. |
 | `POST /hapus-uji` | halaman sendiri | tidak | Menghapus templat identitas `uji:`, gambar di memori, dan catatan sampel. Templat siswa dan guru tidak disentuh. |
@@ -568,14 +586,18 @@ Layanan berjalan tanpa pengawasan di PC yang dipakai siswa, jadi hanya
 membuka yang dibutuhkan halaman kiosk. Rute yang tidak dibuka dijawab 404
 untuk GET tanpa Origin, dan 403 untuk permintaan lain. Rute pendaftaran dan
 pencabutan dibuka juga untuk layanan, karena tanpa izin bertanda tangan server
-tidak ada templat yang disimpan atau dihapus.
+tidak ada templat yang disimpan atau dihapus. `/identifikasi` dibuka karena
+halaman kiosk membutuhkannya; batasnya ada di "Identifikasi dari halaman
+kiosk".
 
 "Kiosk" berarti `https://smkt.alhasan.co.id`; hanya `--asal-kiosk` dalam mode
 pengembangan yang bisa menggantinya. Tidak ada rute yang mengembalikan templat,
-gambar, atau kunci, dan tidak ada rute yang menandatangani isi kiriman
-pemanggil. Jembatan tidak pernah menghubungi server sendiri: halaman yang
-membawa tantangan dari server ke jembatan, lalu membawa tanda tangannya
-kembali.
+gambar, atau kunci, dan tidak ada rute yang menandatangani isi sembarang:
+setiap pesan disusun jembatan sendiri dengan bentuk tetap. Dari kiriman
+pemanggil, yang masuk ke pesan tanpa izin server hanya tantangan dan, di
+`/detak`, `adc` yang bernilai 0 atau 1. Jembatan tidak pernah menghubungi
+server sendiri: halaman yang membawa tantangan dari server ke jembatan, lalu
+membawa tanda tangannya kembali.
 
 ### Pendaftaran dan pencabutan berizin
 
@@ -630,6 +652,81 @@ yang sah. Sesi hanya hidup di memori, jadi hilang kalau jembatan dimulai
 ulang. Gambar tempelan tidak disimpan: yang dipegang sesi hanya templatnya,
 dan itu pun dibuang kalau sesinya gagal atau ditinggalkan.
 
+### Identifikasi dari halaman kiosk
+
+Sejak 0.4.0 `/identifikasi` melayani halaman kiosk, juga sebagai layanan.
+Urutannya seperti detak:
+
+1. Halaman meminta tantangan bertujuan `absen` ke `api/sj_tantangan.php`.
+2. Halaman mengirim `{tantangan, format: "raw", sampel}` ke `/identifikasi`.
+3. Jembatan mencocokkan sampel itu dengan templat siswa dan guru, lalu
+   menandatangani hasilnya: pesan `absen` kalau jarinya dikenali, pesan
+   `tolak` kalau tidak.
+4. Halaman meneruskan jawabannya ke `api/sj_absen.php`. Server menyusun ulang
+   pesannya sendiri, lalu mencocokkan HMAC-nya.
+
+Isi jawaban 200:
+
+| Kolom | Isi |
+|---|---|
+| `diterima` | `true` kalau jarinya dikenali; aturannya ada di "Ambang". |
+| `identitas` | `siswa:<id>` atau `guru:<id>`. `null` kalau tidak diterima. |
+| `skor` | Skor kandidat terbaik, dibulatkan ke bawah: bilangan bulat 0 sampai 9999. |
+| `perangkat` | ID perangkat ini. |
+| `waktu_ms` | Lama pengerjaan di jembatan. |
+| `pesan`, `tanda_tangan` | Pesan kanonik dan HMAC-nya. |
+
+Tempelan yang tidak dikenali ikut ditandatangani, supaya server boleh
+mencatatnya: dari catatan itulah tingkat pengenalan diukur. Jari guru yang
+terdaftar ikut dikenali; apa yang dicatat untuk siswa dan untuk guru
+diputuskan server.
+
+Bedanya dari identifikasi untuk halaman uji:
+
+- yang dicocokkan hanya templat siswa dan guru. Templat `uji:` yang
+  tertinggal di galeri tidak bisa menang, dan tidak dihitung sebagai
+  identitas kedua;
+- jawabannya tanpa daftar kandidat dan tanpa diagnostik, dan tidak menyebut
+  siapa pun kalau tempelannya ditolak. Rute ini bisa dipanggil halaman mana
+  pun di situs kiosk yang terbuka di PC itu, jadi jawabannya dibuat
+  sesedikit mungkin;
+- tempelannya tidak disimpan di memori. Yang diingat hanya sidik SHA-256
+  sampelnya, untuk menolak sampel kembar;
+- hanya sampel raw, kecuali dalam mode pengembangan tanpa `--rute-layanan`.
+
+Yang dijawab tanpa tanda tangan, jadi tidak ada yang diteruskan ke server:
+
+- 400 untuk tantangan yang bukan 64 hex huruf kecil, dan untuk sampel yang
+  tidak terbaca;
+- 409 kalau belum ada jari siswa atau guru yang terdaftar;
+- 409 untuk sampel yang sama persis dengan sampel sebelumnya.
+
+Skor di tanda terima `tolak` adalah skor kandidat terbaik. Tempelan yang
+ditolak dengan skor 50 atau lebih berarti dua orang hampir sama kuat:
+selisihnya di bawah 10.
+
+Batas rancangan yang perlu diketahui:
+
+- **Rute ini menjawab sejak 0.4.0 terpasang,** juga selagi server belum
+  menerima absen lewat sidik jari. Jembatan hanya memeriksa bentuk tantangan,
+  dan tidak tahu apakah tantangan itu terbitan server. Tanda tangan atas
+  tantangan lain ditolak server, tetapi isi jawabannya tetap terbaca
+  pemanggil: skor, dan identitas kalau diterima.
+- **Pemanggilnya tidak hanya halaman kiosk.** Halaman mana pun di situs kiosk
+  yang terbuka di Chrome PC itu bisa memanggilnya, dan begitu juga program
+  yang berjalan di PC itu. Jembatan tidak membatasi jumlah percobaan, dan
+  percobaan itu tidak tercatat di Event Viewer.
+- **Tanda tangan membuktikan jembatan ini mencocokkan sebuah sampel, bukan
+  bahwa sebuah jari menyentuh pembaca.** Sampel datang dari halaman, jadi
+  jembatan tidak bisa membedakan tempelan baru dari rekaman tempelan lama.
+- **Jembatan tidak mengingat tantangan.** Yang membuat satu tantangan hanya
+  tercatat sekali adalah server. Tingkat pengenalan yang dihitung dari tanda
+  terima `tolak` mengandaikan halaman meneruskan semuanya.
+
+Karena itu PC kiosk sendiri harus dijaga: akun standar tanpa hak admin, dan
+siswa tidak diberi jalan ke konsol peramban atau ke program lain. Batas ini
+ditinjau lagi sebelum peralihan (4.5).
+
 ### Sampel
 
 Halaman meneruskan sampel dari WebSDK apa adanya; jembatan yang membacanya.
@@ -673,8 +770,9 @@ Templat hanya ada di PC kiosk dan tidak disalin ke server. Kalau folder data
 hilang, semua jari didaftarkan ulang.
 
 Gambar sidik jari tidak pernah ditulis ke disk. Gambar pendaftaran uji dan
-probe identifikasi terakhir disimpan di memori, untuk kalibrasi dan ukur
-waktu. Gambar pendaftaran siswa dan guru tidak disimpan sama sekali.
+probe identifikasi terakhir dari halaman uji disimpan di memori, untuk
+kalibrasi dan ukur waktu. Gambar pendaftaran siswa dan guru, dan tempelan
+dari halaman kiosk, tidak disimpan sama sekali.
 
 ### Tanda tangan
 
@@ -683,10 +781,18 @@ disusupkan, lalu HMAC-SHA256 dalam hex huruf kecil:
 
 ```
 SJ1|absen|<perangkat>|<tantangan 64 hex>|<identitas>|<skor>
+SJ1|tolak|<perangkat>|<tantangan 64 hex>|<skor>
 SJ1|detak|<perangkat>|<tantangan 64 hex>|alat:<0 atau 1>
+SJ1|detak|<perangkat>|<tantangan 64 hex>|alat:<0 atau 1>|adc:<0 atau 1>
 SJ1|terdaftar|<perangkat>|<tantangan 64 hex>|<identitas>|<jari>|<mutu>
 SJ1|dicabut|<perangkat>|<tantangan 64 hex>|<identitas>|<jumlah>
 ```
+
+`tolak` adalah tanda terima untuk tempelan di kiosk yang tidak dikenali. Ia
+tidak memuat identitas, dan memakai tantangan dari jenis yang sama dengan
+pesan `absen`; server hanya menerima satu tanda terima per tantangan. Detak
+berbentuk kedua dipakai kalau halaman melaporkan keadaan pembaca menurut ADC;
+tanpa laporan itu bentuknya tetap yang pertama.
 
 Dua pesan lain ditandatangani server dan hanya diperiksa jembatan:
 
@@ -711,6 +817,10 @@ Vektor uji, untuk memastikan server menyusun pesan dan HMAC yang sama:
 | HMAC absen | `5143256d84f0681ff427ffdb4f43b170d7aef6defc4cf052d85bad90b758223f` |
 | Pesan detak | `SJ1\|detak\|kiosk-uji\|<tantangan>\|alat:0` |
 | HMAC detak | `560ca340fdcbcf931d460a0936578fd1ed3976a7aea0af5fef1a38b6a8b65bae` |
+| Pesan tolak | `SJ1\|tolak\|kiosk-uji\|<tantangan>\|31` |
+| HMAC tolak | `3eb813096644921ce4eab24c5e641d2a3a089d4474aac3ddbadc80752edc2440` |
+| Pesan detak dengan ADC | `SJ1\|detak\|kiosk-uji\|<tantangan>\|alat:1\|adc:0` |
+| HMAC detak dengan ADC | `30fe9ba68854d15b0b5b811a04a88b191ade580141ae636e98f30fe6bd3a087e` |
 | Pesan izin daftar | `SJ1\|izin-daftar\|kiosk-uji\|<tantangan>\|siswa:123\|telunjuk-kanan` |
 | HMAC izin daftar | `1e7ade55a30e25372bccb1ece40ac31fce69fe296ad054d8110a57d59b1004f4` |
 | Pesan izin cabut | `SJ1\|izin-cabut\|kiosk-uji\|<tantangan>\|siswa:123` |
@@ -745,11 +855,28 @@ Tantangan berlaku 120 detik dan hanya bisa dipakai sekali. Sisi servernya ada
 di `includes/sidik_jari.php`. Tombol "Uji rantai" di panel admin menjalankan
 ketiga langkah itu sekali.
 
+Sejak 0.4.0 halaman boleh menyertakan `adc` di kiriman `/detak`: bilangan 1
+kalau ADC melihat pembacanya, 0 kalau tidak. Jembatan menuliskannya ke pesan
+sebagai kolom tersendiri, dan menggemakannya di kolom `adc` jawabannya.
+
+- **Halaman meneruskan `adc` dari jawaban jembatan, bukan nilai kirimannya
+  sendiri.** Jembatan sebelum 0.4.0 mengabaikan `adc`, menandatangani pesan
+  bentuk lama, dan jawabannya tidak memuat `adc`. Dengan begitu yang sampai
+  ke server selalu sama dengan yang ditandatangani.
+- **Hanya bilangan 0 atau 1.** Teks `"1"`, `true`, dan bilangan lain ditolak
+  400. `null` sama dengan tidak menyertakannya.
+- **`alat` tetap pemeriksaan jembatan sendiri, lewat Windows. `adc` laporan
+  halaman,** yang oleh jembatan hanya diteruskan ke pesan bertanda tangan.
+  Detak dengan `alat` 1 dan `adc` 0 berarti Windows masih melihat pembacanya
+  sedangkan halaman tidak bisa menangkap jari, seperti pada uji 5 Oktober.
+
 ### Ambang
 
 Identifikasi diterima kalau skor terbaik ≥ 50 dan unggul ≥ 10 atas identitas
-kedua. Ambang 1:1 SourceAFIS (40) dipakai untuk mencari jari ganda dan untuk
-keterhubungan tempelan pendaftaran. Angka 50 dan 10 semula nilai awal
+kedua. Aturannya satu untuk halaman uji dan halaman kiosk; untuk kiosk,
+identitas kedua hanya dicari di antara siswa dan guru. Ambang 1:1 SourceAFIS
+(40) dipakai untuk mencari jari ganda dan untuk keterhubungan tempelan
+pendaftaran. Angka 50 dan 10 semula nilai awal
 prototipe. Uji 5 Oktober dengan 36 jari mempertahankannya: skor tertinggi
 terhadap orang lain 45,8, dua kali, dan menurunkan ambang ke 40 hanya akan
 menolong 11 dari 60 tempelan yang ditolak.
@@ -824,14 +951,18 @@ Harus dicabut atau diubah sebelum dipakai untuk siswa (4.3 sampai 4.4):
 - Rute `/kalibrasi`, `/ukur`, `/hapus-uji`, dan `/galeri`, serta halaman uji
   di `/` beserta pemilih berkas mode pengembangan. Sejak 0.2.0 semuanya hanya
   ada di jendela konsol; layanan tidak membukanya.
-- Identitas `uji:` di `Brankas.cs`. Server menolaknya, dan sesi berizin juga.
-- Cek alat yang hanya lewat Windows. Di 4.4 detak ikut memuat keadaan pembaca
-  menurut ADC.
+- Identitas `uji:` di `Brankas.cs`. Server menolaknya, sesi berizin juga, dan
+  identifikasi dari halaman kiosk tidak mencocokkannya.
+- Cek alat yang hanya lewat Windows. Sejak 0.4.0 detak bisa memuat keadaan
+  pembaca menurut ADC, tetapi halaman kiosk yang melaporkannya belum ada.
 - Probe identifikasi terakhir yang disimpan di memori untuk `/ukur`, dan
   `skor_probe_sebelumnya` di jawaban `/identifikasi`: kemiripan dengan
-  tempelan sebelumnya, hanya untuk menyelidiki tempelan yang gagal.
+  tempelan sebelumnya, hanya untuk menyelidiki tempelan yang gagal. Keduanya
+  hanya untuk halaman uji.
 - Catatan laporan yang disimpan halaman uji di `localStorage` peramban,
   termasuk catatan kejadian dan riwayat mulai ulang penangkapan.
 - Format PNG; di produksi hanya Raw.
 - Ambang 50 dan selisih 10, ditinjau lagi setelah diukur dengan siswa di 4.4.
-- Identifikasi dari halaman kiosk, yang baru dibuka di 4.4.
+- Jawaban diagnostik `/identifikasi` untuk halaman uji: daftar kandidat, waktu
+  per tahap, dan tanda tangan absen atas identitas `uji:`. Halaman kiosk
+  mendapat jawaban ringkasnya sendiri sejak 0.4.0.
