@@ -253,7 +253,7 @@ sealed class Pencocok
         var kedua = teratas.Length > 1 ? teratas[1].Value : (double?)null;
         var diterima = terbaik.Value >= Ambang && (kedua is null || terbaik.Value - kedua.Value >= Selisih);
         var tanda = diterima
-            ? _brankas.TandatanganiAbsen(permintaan.Tantangan!, terbaik.Key, (int)Math.Min(Math.Floor(terbaik.Value), 9999))
+            ? _brankas.TandatanganiAbsen(permintaan.Tantangan!, terbaik.Key, (int)Math.Min(Math.Floor(terbaik.Value), 9999), hanyaResmi: false)
             : null;
         _probeTerakhir = new Probe(sampel, probe, galeri.Dpi);
         var total = Stopwatch.GetElapsedTime(mulai);

@@ -26,9 +26,14 @@
 // sembarang. Setiap kolom diperiksa polanya sebelum digabung, jadi pemisah |
 // tidak bisa disusupkan:
 //   SJ1|absen|<perangkat>|<tantangan>|<identitas>|<skor>
+//   SJ1|tolak|<perangkat>|<tantangan>|<skor>
 //   SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>
+//   SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>|adc:<0 atau 1>
 //   SJ1|terdaftar|<perangkat>|<tantangan>|<identitas>|<jari>|<mutu>
 //   SJ1|dicabut|<perangkat>|<tantangan>|<identitas>|<jumlah>
+// tolak adalah tanda terima untuk tempelan di kiosk yang tidak dikenali.
+// Detak berbentuk kedua dipakai kalau halaman kiosk melaporkan keadaan pembaca
+// menurut ADC; tanpa laporan itu bentuknya tetap yang pertama.
 // Dua pesan lain hanya DIPERIKSA di sini, tidak pernah ditandatangani. Itu
 // izin dari server untuk mendaftarkan atau mencabut:
 //   SJ1|izin-daftar|<perangkat>|<tantangan jembatan>|<identitas>|<jari>
@@ -160,10 +165,13 @@ sealed partial class Brankas
 
     public static bool TantanganSah(string? tantangan) => Cocok(PolaTantangan(), tantangan);
 
-    public TandaTangan TandatanganiAbsen(string tantangan, string identitas, int skor)
+    // hanyaResmi: untuk halaman kiosk. Identitas uji: ditolak, karena pesan
+    // itu akan dikirim ke server sebagai absen. Tanpa nilai bawaan, supaya
+    // setiap pemanggil memilihnya dengan sadar.
+    public TandaTangan TandatanganiAbsen(string tantangan, string identitas, int skor, bool hanyaResmi)
     {
         Wajib(PolaTantangan(), tantangan, nameof(tantangan));
-        Wajib(PolaIdentitas(), identitas, nameof(identitas));
+        Wajib(hanyaResmi ? PolaIdentitasResmi() : PolaIdentitas(), identitas, nameof(identitas));
         if (skor is < 0 or > 9999)
         {
             throw new ArgumentOutOfRangeException(nameof(skor), "Skor harus 0 sampai 9999.");
@@ -172,11 +180,33 @@ sealed partial class Brankas
                                         skor.ToString(CultureInfo.InvariantCulture)));
     }
 
-    public TandaTangan TandatanganiDetak(string tantangan, bool alatTerhubung)
+    // Tanda terima untuk tempelan di kiosk yang tidak dikenali. Tidak memuat
+    // identitas, hanya skor kandidat terbaiknya. Tantangannya dari jenis yang
+    // sama dengan pesan absen. Jembatan tidak mengingat tantangan; server yang
+    // hanya menerima satu tanda terima per tantangan.
+    public TandaTangan TandatanganiTolak(string tantangan, int skor)
     {
         Wajib(PolaTantangan(), tantangan, nameof(tantangan));
-        return Tandatangani(string.Join('|', VersiPesan, "detak", Perangkat, tantangan,
-                                        alatTerhubung ? "alat:1" : "alat:0"));
+        if (skor is < 0 or > 9999)
+        {
+            throw new ArgumentOutOfRangeException(nameof(skor), "Skor harus 0 sampai 9999.");
+        }
+        return Tandatangani(string.Join('|', VersiPesan, "tolak", Perangkat, tantangan,
+                                        skor.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    // adc adalah keadaan pembaca menurut ADC, seperti dilaporkan halaman
+    // kiosk. null berarti halaman tidak melaporkannya, dan pesannya berbentuk
+    // lama: server dan halaman yang belum mengenal adc tetap bisa memakainya.
+    public TandaTangan TandatanganiDetak(string tantangan, bool alatTerhubung, bool? adc = null)
+    {
+        Wajib(PolaTantangan(), tantangan, nameof(tantangan));
+        var pesan = string.Join('|', VersiPesan, "detak", Perangkat, tantangan, alatTerhubung ? "alat:1" : "alat:0");
+        if (adc is bool siap)
+        {
+            pesan += siap ? "|adc:1" : "|adc:0";
+        }
+        return Tandatangani(pesan);
     }
 
     // ---------- Pendaftaran dan pencabutan berizin ----------
