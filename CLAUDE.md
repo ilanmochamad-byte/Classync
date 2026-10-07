@@ -306,14 +306,22 @@ Penggolongannya ada di `includes/status_harian.php`, dan dijalankan oleh
 
 **Aturan pulang, berlaku mulai 29 September 2026.** `api/proses_absen_siswa.php`
 dipakai kiosk dan menu Absen Siswa di aplikasi. Endpoint ini menolak absen
-pulang dalam tiga keadaan:
+pulang dalam empat keadaan:
 
 - sebelum jam pulang hari itu;
 - siswa belum absen masuk;
-- siswa sudah diberi izin pulang.
+- siswa sudah diberi izin pulang;
+- siswa sudah absen pulang.
 
 Penolakan dikirim sebagai `message` biasa, dan aplikasi versi lama
 menampilkannya apa adanya.
+
+Sejak 7 Oktober 2026 aturan itu ada di satu tempat, bersama pencatatan absen
+masuk, penyimpanan foto, dan teks WA orang tua: `catatAbsenSiswa()` di
+`includes/absen_siswa.php`. Dua jalur memanggilnya, yaitu
+`api/proses_absen_siswa.php` untuk QR/NISN dan `api/sj_absen.php` untuk sidik
+jari. Mengubah aturan absen siswa berarti mengubah fungsi itu, bukan salah
+satu endpoint.
 
 - Siswa yang harus pulang lebih awal dicatat guru piket di kartu Izin Pulang
   Lebih Awal (`absen_manual.php`). Akibatnya:
@@ -340,9 +348,10 @@ pantau belum ada laporan yang membaca `status_harian`. Yang masih menunggu:
 - **Sebelas berkas laporan pindah ke `status_harian`,** satu per satu,
   termasuk dua di repo API. Tanggal sebelum aturan ini berlaku tetap memakai
   logika lama.
-- **Sidik jarinya sendiri.** Fondasi dan pendaftaran jarinya sudah ada, lihat
-  "Absensi sidik jari: jembatan, tantangan, dan detak kiosk" di bawah. Absen
-  lewat sidik jari belum dibuka.
+- **Sidik jarinya sendiri.** Fondasi, pendaftaran jari, dan absen di kiosk
+  sudah ada di repo, lihat "Absensi sidik jari: jembatan, tantangan, dan
+  detak kiosk" di bawah. Absen lewat sidik jari masih tertutup di balik
+  saklar, dan belum dinyalakan di produksi.
 
 Terverifikasi di produksi 28 September 2026:
 
@@ -384,21 +393,27 @@ peralihan. Yang sudah ada di repo:
 - 4.1 (PR #18–#22);
 - 4.2: sisi server di PR #23, jembatan 0.2.0 di PR #24, dan detak dari
   halaman kiosk di PR #25;
-- 4.3: sisi server di PR #27, jembatan 0.3.0 di PR #28, lalu halaman
-  pendaftarannya.
+- 4.3: sisi server di PR #27, jembatan 0.3.0 di PR #28, dan halaman
+  pendaftarannya di PR #29;
+- 4.4: sisi server di PR #30, inti absen bersama di PR #31, jembatan 0.4.0 di
+  PR #32, lalu skrip kiosknya.
 
-**Absen lewat sidik jari belum dibuka.** Alur QR/NISN di `absen-siswa.php`
-dan `api/proses_absen_siswa.php` tidak berubah. Yang ada baru dua hal: detak,
-bukti bahwa halaman kiosk, jembatan, dan server saling mengenali; dan
-pendaftaran jari dari panel admin.
+**Absen lewat sidik jari tertutup di balik saklar, dan per 7 Oktober 2026
+belum dinyalakan di produksi.** Selama `$sj_absen_kiosk` di berkas konfigurasi
+bukan `true`, server menolak semua kirimannya dan halaman kiosk tidak memuat
+skripnya. Absen QR/NISN di `absen-siswa.php` tetap berjalan untuk semua siswa,
+juga setelah saklarnya menyala: 4.4 adalah masa ukur, belum menutup titip
+absen. Yang sudah terbukti berjalan di produksi baru dua: detak, bukti bahwa
+halaman kiosk, jembatan, dan server saling mengenali; dan pendaftaran jari,
+lihat catatan 7 Oktober di bawah.
 
 **Tiga bagian, dan jembatan tidak ikut deploy.**
 
 | Bagian | Berkas | Sampai ke tempatnya lewat |
 |---|---|---|
 | jembatan | `jembatan/`, layanan Windows di PC kiosk yang hanya mendengar di `127.0.0.1:47890` | `.exe` yang dibangun di Mac lalu disalin lewat USB; `.cpanel.yml` tidak menyalin folder itu |
-| server | `includes/sidik_jari.php`; untuk detak `api/sj_tantangan.php`, `api/sj_detak.php`, `admin/kiosk_sidik_jari.php`; untuk pendaftaran `admin/sj_izin.php`, `admin/sj_catat.php`, `admin/sidik_jari.php` | deploy biasa |
-| halaman | `includes/sj_detak_klien.php`, di-include `absen-siswa.php`; `includes/sj_tangkap_klien.php`, di-include `admin/sidik_jari.php` | deploy biasa |
+| server | `includes/sidik_jari.php`; untuk detak `api/sj_tantangan.php`, `api/sj_detak.php`, `admin/kiosk_sidik_jari.php`; untuk pendaftaran `admin/sj_izin.php`, `admin/sj_catat.php`, `admin/sidik_jari.php`; untuk absen `api/sj_absen.php`, `includes/absen_siswa.php` | deploy biasa |
+| halaman | `includes/sj_detak_klien.php` dan `includes/sj_absen_klien.php`, di-include `absen-siswa.php`; `includes/sj_tangkap_klien.php`, di-include `admin/sidik_jari.php` dan `includes/sj_absen_klien.php` | deploy biasa |
 
 Jembatan mencocokkan sidik jari dan menandatangani hasilnya dengan HMAC,
 memakai kunci per kiosk. Ia tidak pernah menghubungi server sendiri: halaman
@@ -426,11 +441,17 @@ dan `fcm-classync.php`:
 ```php
 $sj_rahasia_tantangan = ['<64 karakter hex>'];
 $sj_perangkat = ['kiosk-xxxxxx' => ['aktif' => true, 'kunci' => ['<64 karakter hex>']]];
+$sj_absen_kiosk = true;     // saklar absen di kiosk
 ```
 
-- **Keduanya berupa daftar,** supaya bisa dirotasi tanpa deploy: tambahkan
-  yang baru, alihkan, lalu cabut yang lama. Rahasia pertama dipakai
+- **Rahasia dan kunci berupa daftar,** supaya bisa dirotasi tanpa deploy:
+  tambahkan yang baru, alihkan, lalu cabut yang lama. Rahasia pertama dipakai
   menerbitkan tantangan, dan semua yang terdaftar diterima.
+- **`$sj_absen_kiosk` adalah saklar absen di kiosk.** Hanya `true` yang
+  menyalakan; tanpa baris itu saklarnya mati. Nilai lain, misalnya `1` atau
+  `'ya'`, dianggap mati dan dilaporkan di halaman pantau. Mematikannya
+  berlaku seketika di server, dan halaman kiosk yang sedang terbuka berhenti
+  menangkap dalam kira-kira semenit.
 - **Rahasia tantangan** dibuat di Terminal cPanel dengan
   `openssl rand -hex 32`.
 - **ID dan kunci perangkat dibuat jembatan sendiri.** Kuncinya hanya keluar
@@ -452,7 +473,9 @@ rantai:
 2. `POST api/sj_tantangan.php`, yang menerbitkan tantangan untuk perangkat
    itu;
 3. `POST /detak` ke jembatan, yang menandatangani
-   `SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>`;
+   `SJ1|detak|<perangkat>|<tantangan>|alat:<0 atau 1>`. Kalau halaman
+   melaporkan keadaan pembaca menurut ADC, pesannya diakhiri
+   `|adc:<0 atau 1>`;
 4. `POST api/sj_detak.php`, yang menyusun ulang pesan itu sendiri,
    mencocokkan HMAC-nya, lalu mencatat satu baris di `detak_kiosk`.
 
@@ -470,18 +493,37 @@ jembatan, dan kunci yang sama di kedua sisi.
 - **Tantangan sekali pakai.** Berlaku 120 detik, dan terikat pada tujuan dan
   perangkatnya. Kunci utama `tantangan_kiosk` yang menolak pemakaian kedua,
   termasuk dari kiriman serentak.
-- **Tujuan yang dibuka baru `detak`.** Pesan `SJ1|absen|…` sudah dikenal
-  jembatan dan pustaka, tetapi belum ada endpoint yang menerimanya.
+- **Tujuan yang dibuka: `detak`, dan `absen` selagi saklarnya menyala.**
+  Tantangan untuk `daftar` dan `cabut` tidak diterbitkan di sini, melainkan
+  oleh `admin/sj_izin.php` untuk admin yang sedang login.
 - **Kolom `alat` adalah keadaan pembaca menurut Windows,** bukan menurut ADC
   yang dipakai halaman untuk menangkap sidik jari. Pada uji 5 Oktober pembaca
   hilang dari ADC selagi PC ditinggal, sementara detak tetap melaporkan alat
   terpasang. Jadi `alat = 1` belum membuktikan kiosk bisa menangkap jari.
+- **Kolom `adc` menjawab "bisakah halaman kiosk menangkap jari saat itu",**
+  seperti dilaporkan halaman kiosk:
+  - 1 kalau penangkapan sedang berjalan;
+  - 0 kalau ADC tidak menjawab, pembacanya tidak terlihat ADC, atau jendela
+    kiosknya tidak aktif;
+  - kosong kalau tidak dilaporkan.
+
+  Tentang yang kosong:
+  - Ia baru terisi kalau skrip absen sedang menangkap dan jembatannya 0.4.0
+    ke atas.
+  - Detak yang jatuh sebelum ADC menjawab atau selagi penangkapan baru
+    dimulai, misalnya tepat setelah halaman kiosk dimuat ulang, juga dikirim
+    tanpa `adc`. Jadi satu detak "tidak dilaporkan" di antara detak yang
+    terisi bukan tanda gangguan.
+  - Server hanya mencatatnya kalau ikut ditandatangani jembatan.
+  - `alat` 1 dengan `adc` 0 adalah keadaan 5 Oktober itu: Windows melihat
+    pembacanya, halaman tidak bisa menangkap jari.
 - **Masalah konfigurasi tampil di halaman pantau, bukan di `error_log`.**
   Yang masuk ke `classync/error_log` hanya galat server yang tidak bisa
-  dipicu dari luar: `[sj_detak]` untuk galat basis data setelah tanda tangan
-  sah, dan `[sj_tantangan]` kalau tantangan tidak bisa dibuat.
-- **Kedua endpoint aman dibuka lewat URL.** Permintaan selain POST dijawab
-  405 sebelum apa pun dibaca.
+  dipicu dari luar: `[sj_detak]` dan `[sj_absen]` untuk galat setelah tanda
+  tangan sah, dan `[sj_tantangan]` kalau tantangan tidak bisa dibuat.
+- **Endpoint-endpoint ini aman dibuka lewat URL.** Permintaan selain POST
+  dijawab 405 sebelum apa pun dibaca. Itu berlaku juga untuk
+  `api/sj_absen.php`.
 
 **Detak dari halaman kiosk** ada di `includes/sj_detak_klien.php`.
 
@@ -504,6 +546,11 @@ jembatan, dan kunci yang sama di kedua sisi.
 - **Jadwalnya juga disimpan di `localStorage`.** Halaman kiosk memuat ulang
   dirinya 2 detik setelah tiap scan berhasil. Pewaktu biasa akan terulang
   dari nol pada jam sibuk, dan kiosk tampak diam justru saat paling ramai.
+- **Ikut melaporkan keadaan pembaca menurut ADC** kalau skrip absen sedang
+  menangkap, lewat `window.SjAbsenKiosk.adc()`. Yang diteruskan ke server
+  adalah `adc` dari jawaban jembatan, bukan nilai yang dikirim halaman:
+  jembatan sebelum 0.4.0 mengabaikannya dan menandatangani pesan bentuk lama.
+  Tanpa skrip absen, kiriman detak sama persis dengan sebelumnya.
 - **Galat di berkas ini tidak boleh merusak halaman kiosk.**
   `absen-siswa.php` meng-include-nya setelah `is_readable()`, di dalam
   `try`/`catch`.
@@ -522,6 +569,21 @@ Jari).
   halaman itu. Jembatan hanya mendengar di `127.0.0.1`, jadi uji ini hanya
   berhasil di PC kiosk. Dari komputer lain ia gagal di baris pertama, dan itu
   bukan tanda kiosk rusak.
+- **Kalimat pembukanya menyebut keadaan saklar:** absen lewat sidik jari
+  "dibuka" atau "belum dibuka".
+- **Kolom "Pembaca (ADC)"** menampilkan `adc` detak terakhir: siap, tidak
+  siap, atau tidak dilaporkan.
+- **"Absen lewat sidik jari, 7 hari terakhir"** dihitung dari
+  `log_absen_sidik_jari`: tempelan, yang dikenali, yang ditolak, dan bagian
+  absen masuk yang lewat sidik jari.
+  - Tempelan yang tidak dikenali tidak punya nama. Jadi "dikenali pada
+    tempelan pertama" dan "dalam tiga tempelan" adalah perkiraan dari urutan
+    waktunya: tempelan gagal yang disusul tempelan dikenali dalam 20 detik
+    dianggap dari orang yang sama.
+  - Persentasenya dihitung atas semua rangkaian, jadi orang yang jarinya
+    belum terdaftar ikut menurunkannya.
+- **"Hari ini"** merinci alasan penolakan, dan mendaftar siswa terdaftar yang
+  absen masuk tanpa sidik jari. Siswa PKL tidak dihitung.
 
 Kalau kiosk "diam" padahal halamannya terbuka, periksa berurutan:
 
@@ -548,6 +610,13 @@ Terverifikasi di produksi 6 Oktober 2026, di PC kiosk dengan jembatan 0.2.0:
   di konsol:
   `navigator.permissions.query({name: 'loopback-network'}).then(p => console.log(p.state), console.error)`
 
+Pada 7 Oktober 2026 halaman pantau produksi menampilkan jembatan
+`0.4.0+41fb973` berjalan sebagai layanan, dan Uji rantai mendapati sidik
+kuncinya sama dengan kunci yang terdaftar di server. Jadi memperbarui jembatan
+di atas layanan yang sedang berjalan mempertahankan pasangannya. Detaknya
+"hidup", alatnya terpasang, dan kolom ADC "tidak dilaporkan", seperti
+seharusnya sebelum saklarnya menyala.
+
 Belum teruji:
 
 - **Detak sepanjang jam sekolah,** termasuk jam sibuk dengan scan sungguhan.
@@ -555,6 +624,9 @@ Belum teruji:
   kiosk terbuka perlu diselidiki.
 - **Tiga pemeriksaan akun standar** di fase C README jembatan. Hasilnya
   belum dilaporkan.
+- **Rute `/identifikasi` di jembatan 0.4.0 yang terpasang.** Perintah
+  `curl.exe` untuk memeriksanya ada di README jembatan, "Memperbarui jembatan
+  di PC kiosk yang sudah dipasangkan". Hasilnya belum dilaporkan.
 
 **Pendaftaran jari (4.3)** dikerjakan admin di `admin/sidik_jari.php` (Data →
 Pendaftaran Sidik Jari), yang dibuka di Chrome PC kiosk. Halaman yang sama
@@ -600,7 +672,7 @@ dipakai dari komputer mana pun untuk mencatat persetujuan.
   skrip detak: di komputer lain, permintaan itu memunculkan permintaan izin.
   Pustaka WebSDK juga baru dimuat saat itu.
 - **Penangkapan ada di `includes/sj_tangkap_klien.php`,** dipindahkan dari
-  halaman uji jembatan, dan akan dipakai lagi halaman kiosk di 4.4. Aturan
+  halaman uji jembatan, dan dipakai juga skrip absen kiosk (4.4). Aturan
   yang ditemukan di PC kiosk tertulis di komentar berkasnya: hanya Raw,
   perintah ke ADC berantrean dan dibatasi 5 detik, dan penangkapan dimulai
   lagi setelah jendela aktif kembali.
@@ -616,30 +688,179 @@ dipakai dari komputer mana pun untuk mencatat persetujuan.
   pendaftaran guru piket. Tiap penolakan tercatat di Event Viewer PC kiosk,
   sumber `JembatanSidikJari`.
 
-Seluruh 4.3 belum teruji di produksi saat catatan ini ditulis. Yang paling
-perlu dilihat di PC kiosk:
+Pada 7 Oktober 2026 halaman pendaftaran produksi menampilkan 30 orang dengan
+dua jari terdaftar, yaitu semua yang persetujuannya tercatat `setuju`.
+Catatan itu hanya ditulis dari tanda terima jembatan, jadi di PC kiosk sudah
+berjalan: penangkapan lewat WebSDK dari alamat produksi, sesi berizin dengan
+sampel pembaca sungguhan, dan pencatatan tanda terimanya.
 
-- memperbarui jembatan ke 0.3.0 di atas layanan yang sedang berjalan;
-- penangkapan lewat WebSDK dari halaman admin. Dari alamat produksi baru
-  terbukti satu permintaan ke ADC (5 Oktober); penangkapannya sendiri baru
-  terbukti dari halaman uji jembatan;
-- sampel pembaca sungguhan lewat sesi berizin, dan gerbang mutu pada jari
-  siswa. Angkanya dihitung dari enam orang dewasa.
+Belum dilaporkan dari pendaftaran itu:
 
-Yang masih menunggu sesudah 4.3:
+- berapa tempelan yang ditolak gerbang mutu atau penjaga jari ganda,
+  terutama pada jari siswa. Angka gerbangnya dihitung dari enam orang
+  dewasa;
+- apakah baris "Templat" di halaman itu cocok dengan catatan server.
 
-- **4.4, kiosk berdampingan dengan QR/NISN.** Layar kiosk tidak boleh mati,
-  detak memuat keadaan pembaca menurut ADC, dan tingkat pengenalan diukur
-  ulang dengan siswa.
-- **4.5, peralihan.**
+**Absen di kiosk (4.4)** berjalan di halaman kiosk yang sama dengan QR/NISN,
+lewat `includes/sj_absen_klien.php`. Untuk tiap tempelan:
 
-Keempat tabelnya dibuat manual di phpMyAdmin, jadi tidak ada di repo. Dua
-yang pertama membersihkan diri sendiri: `tantangan_kiosk` hanya menyimpan
-tantangan yang sudah dipakai, selama sehari, dan `detak_kiosk` satu baris per
-detak selama 60 hari. Dua yang terakhir tidak. Di `pendaftaran_sidik_jari`,
+1. halaman menangkap jarinya lewat `SjTangkap` dan memotret lewat webcam;
+2. `POST /identifikasi` ke jembatan, dengan tantangan bertujuan `absen` yang
+   sudah disiapkan lebih dulu;
+3. jembatan mencocokkannya dengan templat siswa dan guru, lalu menandatangani
+   hasilnya: `SJ1|absen|<perangkat>|<tantangan>|<identitas>|<skor>` kalau
+   dikenali, `SJ1|tolak|<perangkat>|<tantangan>|<skor>` kalau tidak;
+4. `POST api/sj_absen.php`, yang memeriksa tantangan dan tanda tangan itu,
+   baru kemudian membuka basis data.
+
+Di sisi server:
+
+- **Masuk atau pulang diputuskan server, bukan halaman.** Pulang kalau siswa
+  sudah absen masuk hari itu, atau kalau jam pulang hari sekolah itu sudah
+  lewat; selain itu masuk. Aturan dan kalimat penolakannya sama dengan jalur
+  QR/NISN, karena keduanya memanggil `catatAbsenSiswa()`. Dua akibatnya:
+  - siswa yang belum absen masuk dan baru menempel setelah jam pulang
+    ditolak;
+  - pada hari tanpa sekolah, tempelan kedua langsung tercatat pulang.
+- **Yang dicatat hanya siswa yang belum lulus, persetujuannya `setuju`, dan
+  jarinya tercatat aktif di perangkat itu.** Jari guru dijawab "dikenali,
+  tidak ada absensi yang dicatat". Login piket lewat sidik jari bukan bagian
+  4.4.
+- **Tempelan yang tidak dikenali ikut ditandatangani jembatan,** sebagai
+  `tolak`. Tanpa tanda terima itu server tidak boleh mencatatnya, dan tingkat
+  pengenalan tidak bisa diukur. Setiap tempelan yang tanda tangannya sah
+  masuk `log_absen_sidik_jari`.
+- **`api/sj_absen.php` terbuka untuk umum,** seperti kedua endpoint detak,
+  dan memegang aturan yang sama: basis data, folder foto, dan `error_log`
+  baru disentuh setelah tanda tangan perangkat terbukti sah.
+- **Kirimannya paling besar 1 MB dan harus berupa objek JSON datar.** Di atas
+  itu dijawab 413 sebelum tantangannya dipakai, jadi halaman mengirim ulang
+  tanda terima yang sama tanpa foto.
+- **WA orang tua dikirim setelah jawaban sampai ke kiosk.** Isinya sama
+  dengan jalur QR/NISN.
+
+Di halaman kiosk:
+
+- **Skripnya hanya dikeluarkan selagi saklarnya menyala dan ada perangkat
+  aktif yang berkunci.** Sebelum itu baris include-nya di `absen-siswa.php`
+  tidak menambah satu byte pun. Modul `SjTangkap` dikeluarkan dari berkas
+  yang sama.
+- **Hanya berjalan di peramban kiosk,** dengan gerbang yang sama dengan skrip
+  detak: izin `loopback-network` berstatus `granted`, atau penanda
+  `?detak=hidup`. Di peramban lain ia berhenti sebelum membuat elemen, memuat
+  WebSDK, atau mengirim permintaan apa pun.
+- **Butuh jembatan 0.4.0 ke atas.** Versinya dibaca dari `/status`. Dengan
+  jembatan yang lebih lama, atau yang tidak terdaftar di server, penangkapan
+  tidak dimulai.
+- **Lencana di pojok gambar webcam memberi tahu keadaannya:**
+  - "Sidik jari siap";
+  - "Pembaca sidik jari tidak terhubung";
+  - "Sidik jari tidak tersedia", kalau ADC atau jembatan di PC itu tidak
+    menjawab, atau jembatannya lebih lama dari 0.4.0;
+  - "Klik halaman ini untuk mengaktifkan sidik jari", karena WebSDK hanya
+    melayani jendela yang sedang aktif;
+  - "Menyiapkan sidik jari…", selagi ADC belum menjawab atau penangkapan
+    baru dimulai.
+
+  Kalau server yang menutup (saklarnya dimatikan, atau perangkatnya dicabut
+  atau tidak terdaftar), penangkapan berhenti dan lencananya hilang. Hasil
+  tiap tempelan ditumpangkan di tempat yang sama selama 4 detik. Tata letak
+  halaman tidak berubah.
+- **Tantangan disiapkan lebih dulu,** supaya tempelan tidak menunggu server
+  dua kali. Ia diganti setelah 60 detik, dan langsung setelah dipakai.
+- **Foto webcam hanya dikirim kalau jarinya dikenali.** `Webcam.snap()`
+  memunculkan `alert()` kalau kameranya belum siap, jadi kesiapannya
+  diperiksa dulu. Tanpa kamera absennya tetap tercatat, tanpa foto.
+- **Halaman tidak dimuat ulang 2 detik setelah absen sidik jari,** berbeda
+  dari QR/NISN. Muat ulang ditunda sampai 15 detik tanpa tempelan, supaya
+  antrean tidak menunggu WebSDK menyala lagi untuk tiap siswa.
+  - Selagi sebuah tempelan diproses, dan sampai 15 detik sesudahnya, muat
+    ulang 2 detik milik alur QR/NISN ikut ditunda. Tanpa itu ia memotong
+    tempelan yang sedang diproses: tempelannya hilang, atau tercatat tanpa
+    hasilnya sempat tampil.
+  - Caranya lewat Navigation API (peristiwa `navigate`), jadi kode alur
+    QR/NISN tidak disentuh. Di luar 15 detik itu alur QR/NISN memuat ulang
+    seperti biasa, dan muat ulang dari tombol peramban tidak pernah ditahan.
+  - NISN yang belum selesai dikirim dan hasil QR/NISN yang sedang tampil
+    menunda muat ulang itu lagi, paling lama semenit.
+- **DPI tempelan dibandingkan dengan DPI templat** dari `/status`, dengan
+  batas 5% seperti di halaman pendaftaran. Kalau berbeda, driver pembacanya
+  kemungkinan berganti. Tiap tempelan lalu dijawab dengan pesan untuk admin
+  tanpa dikirim ke jembatan, supaya tidak ditolak tanpa sebab yang terlihat.
+- **ADC yang tidak menjawab dihubungi lagi sendiri, makin jarang:** pada
+  pemeriksaan berikutnya, lalu 30 detik, 1, 2, dan 4 menit kemudian,
+  seterusnya 5 menit sekali. Tiap percobaan membuat objek WebSDK baru, jadi
+  tidak dilakukan tiap 15 detik. Memuat ulang halaman kiosk mengulang dari
+  awal.
+- **Layar dijaga dengan Screen Wake Lock.** Itu lapis kedua. Setelan daya
+  Windows di README jembatan tetap wajib.
+- **Pesan diagnostiknya ada di konsol peramban,** berawalan `[absen sidik
+  jari]`. Peringatan dari pemeriksaan berkala ditulis sekali per gangguan,
+  yang menyangkut satu tempelan ditulis per tempelan, dan baris
+  `[absen sidik jari] aktif lewat izin` menandakan skripnya berjalan.
+- **Galat di berkas ini tidak boleh merusak halaman kiosk.** Ia di-include
+  seperti skrip detak: setelah `is_readable()`, di dalam `try`/`catch`.
+
+Batas rancangan yang sudah diketahui. Rinciannya ada di README jembatan,
+"Identifikasi dari halaman kiosk". Semuanya butuh akses skrip di PC kiosk,
+dan harus diputuskan sebelum 4.5:
+
+- **Rute `/identifikasi` jembatan menjawab sejak 0.4.0 terpasang,** tidak
+  diatur saklar server, dan jembatan hanya memeriksa bentuk tantangan. Skor
+  dan identitas di jawabannya terbaca pemanggil, tanpa batas laju dan tanpa
+  jejak di Event Viewer.
+- **Sampel datang dari halaman.** Jembatan tidak bisa membedakan tempelan
+  baru dari rekaman tempelan lama.
+- **Tingkat pengenalan dari tanda terima `tolak` mengandaikan halaman
+  meneruskan semuanya.**
+
+Menyalakannya, setelah 4.3 terbukti di PC kiosk dan minimal satu orang
+terdaftar:
+
+1. pastikan kedua perubahan basis data 4.4 di bawah sudah dijalankan, dan
+   jembatan di PC kiosk 0.4.0 ke atas;
+2. tambahkan `$sj_absen_kiosk = true;` ke berkas konfigurasi;
+3. buka halaman pantau. Kalimat pembukanya harus berbunyi "dibuka". Muat
+   ulang halaman kiosk; kolom "Pembaca (ADC)" harus terisi dalam satu atau
+   dua menit, yaitu pada detak pertama setelah ADC menjawab;
+4. coba dengan satu guru piket dan beberapa siswa.
+
+Mundurnya: hapus baris itu, atau ubah menjadi `false`. Tabelnya boleh
+dibiarkan.
+
+Seluruh 4.4 belum teruji di produksi saat catatan ini ditulis. Di lokal ia
+diuji dengan halaman kiosk asli dan jembatan 0.4.0 sungguhan, tetapi dengan
+ADC, kamera, dan kunci layar tiruan. Yang paling perlu dilihat di PC kiosk:
+
+- penangkapan terus-menerus lewat WebSDK dari halaman kiosk, sepanjang jam
+  sekolah. Dari alamat produksi penangkapan baru terbukti di halaman
+  pendaftaran (7 Oktober 2026), yang memakai modul `SjTangkap` yang sama;
+- apakah Chrome di PC kiosk memberi Screen Wake Lock, dan apakah pembaca
+  tetap terlihat ADC selagi PC ditinggal;
+- foto dari webcam sungguhan, yang ukurannya mengikuti lebar layar;
+- tingkat pengenalan pada siswa.
+
+Yang masih menunggu sesudah 4.4:
+
+- **4.5, peralihan.** Syaratnya 1–2 minggu tanpa salah orang, dikenali ≥ 90%
+  pada tempelan pertama dan ≥ 99% dalam tiga. Kedua persentase itu hanya
+  perkiraan dari urutan waktu tempelan, dan salah orang hanya ketahuan dari
+  laporan siswa dan foto webcam. Batas rancangan di atas diputuskan lebih
+  dulu.
+- **Login guru piket lewat sidik jari.** Rencana kecil tersendiri, karena
+  menyentuh sesi piket.
+
+Kelima tabelnya dibuat manual di phpMyAdmin, jadi tidak ada di repo. Tiga di
+antaranya membersihkan diri sendiri: `tantangan_kiosk` hanya menyimpan
+tantangan yang sudah dipakai, selama sehari; `detak_kiosk` satu baris per
+detak selama 60 hari; dan `log_absen_sidik_jari` satu baris per tempelan
+selama 60 hari. Dua tabel pendaftaran tidak. Di `pendaftaran_sidik_jari`,
 kolom `aktif` bernilai 1 untuk baris aktif dan NULL untuk yang lain, supaya
 kunci unik `satu_aktif` menjaga paling banyak satu baris aktif per orang,
 jari, dan perangkat.
+
+Dua pernyataan terakhir di bawah adalah perubahan 4.4. Kode servernya tetap
+berjalan tanpa kolom `adc`: detak lalu dicatat tanpa nilai itu.
 
     CREATE TABLE tantangan_kiosk (
       tantangan CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -669,6 +890,15 @@ jari, dan perangkat.
       KEY status (status, identitas),
       CONSTRAINT aktif_sesuai_status CHECK ((status = 'aktif' AND aktif IS NOT NULL AND aktif = 1)
                                          OR (status <> 'aktif' AND aktif IS NULL)));
+    CREATE TABLE log_absen_sidik_jari (
+      id INT NOT NULL AUTO_INCREMENT, waktu DATETIME NOT NULL,
+      perangkat VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+      identitas VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NULL,
+      skor SMALLINT UNSIGNED NOT NULL,
+      hasil ENUM('masuk','pulang','ditolak','tidak_dikenali','bukan_siswa') NOT NULL,
+      keterangan VARCHAR(150) NOT NULL DEFAULT '',
+      PRIMARY KEY (id), KEY waktu (waktu));
+    ALTER TABLE detak_kiosk ADD COLUMN adc TINYINT NULL DEFAULT NULL;
 
 ## Temuan audit
 
@@ -1282,9 +1512,10 @@ terlalu optimis, terutama tentang perilaku mod_mime dan konteks JavaScript.
   `update_absen_harian.php`, `delete_absen_harian.php`,
   `ekspor_detail_absensi.php`, `generate_pdf_absensi.php`, dan `db.php`
   dipanggil panel web; `sj_tantangan.php` dan `sj_detak.php` dipanggil
-  halaman kiosk dan `admin/kiosk_sidik_jari.php`, bukan aplikasi. Catatan
-  lama di sini hanya menyebut pemakaian oleh panel admin, dan itu keliru —
-  grep di repo ini tidak akan menemukan pemanggil dari aplikasi.
+  halaman kiosk dan `admin/kiosk_sidik_jari.php`, dan `sj_absen.php`
+  dipanggil halaman kiosk, bukan aplikasi. Catatan lama di sini hanya
+  menyebut pemakaian oleh panel admin, dan itu keliru — grep di repo ini
+  tidak akan menemukan pemanggil dari aplikasi.
 - Ekspor Excel di halaman rekap/laporan absensi **rusak sejak sebelum**
   pekerjaan kredensial: `admin/laporan.php:8` memanggil `../vendor/autoload.php`
   sementara PhpSpreadsheet ada di `admin/PhpOffice/`. Bukan regresi.

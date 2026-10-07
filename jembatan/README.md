@@ -13,9 +13,10 @@ didaftarkan dan dicabut dari panel admin, dengan izin server (4.3). Mulai
 versi ini layanan juga melayani identifikasi dari halaman kiosk, dan detak
 bisa memuat keadaan pembaca menurut ADC (4.4).
 
-Absensi lewat sidik jari tetap belum dibuka. Halaman kiosk yang memakainya
-belum ada, dan server baru menerimanya setelah sakelar di berkas
-konfigurasinya dinyalakan.
+Absensi lewat sidik jari tetap tertutup sampai saklar di berkas konfigurasi
+server dinyalakan. Skrip halaman kiosk yang memakai rute ini ada di
+`includes/sj_absen_klien.php`; catatannya ada di `CLAUDE.md` di akar
+repositori.
 
 Folder ini tidak ikut deploy: `.cpanel.yml` tidak menyalinnya ke server.
 
@@ -856,8 +857,10 @@ di `includes/sidik_jari.php`. Tombol "Uji rantai" di panel admin menjalankan
 ketiga langkah itu sekali.
 
 Sejak 0.4.0 halaman boleh menyertakan `adc` di kiriman `/detak`: bilangan 1
-kalau ADC melihat pembacanya, 0 kalau tidak. Jembatan menuliskannya ke pesan
-sebagai kolom tersendiri, dan menggemakannya di kolom `adc` jawabannya.
+kalau halaman sedang menangkap jari, 0 kalau tidak bisa (ADC tidak menjawab,
+pembacanya tidak terlihat ADC, atau jendela kiosknya tidak aktif). Jembatan
+menuliskannya ke pesan sebagai kolom tersendiri, dan menggemakannya di kolom
+`adc` jawabannya.
 
 - **Halaman meneruskan `adc` dari jawaban jembatan, bukan nilai kirimannya
   sendiri.** Jembatan sebelum 0.4.0 mengabaikan `adc`, menandatangani pesan
@@ -953,8 +956,9 @@ Harus dicabut atau diubah sebelum dipakai untuk siswa (4.3 sampai 4.4):
   ada di jendela konsol; layanan tidak membukanya.
 - Identitas `uji:` di `Brankas.cs`. Server menolaknya, sesi berizin juga, dan
   identifikasi dari halaman kiosk tidak mencocokkannya.
-- Cek alat yang hanya lewat Windows. Sejak 0.4.0 detak bisa memuat keadaan
-  pembaca menurut ADC, tetapi halaman kiosk yang melaporkannya belum ada.
+- Cek alat yang hanya lewat Windows. Sejak 0.4.0 detak memuat keadaan
+  pembaca menurut ADC kalau halaman kiosk melaporkannya, yaitu selagi skrip
+  absennya menangkap.
 - Probe identifikasi terakhir yang disimpan di memori untuk `/ukur`, dan
   `skor_probe_sebelumnya` di jawaban `/identifikasi`: kemiripan dengan
   tempelan sebelumnya, hanya untuk menyelidiki tempelan yang gagal. Keduanya

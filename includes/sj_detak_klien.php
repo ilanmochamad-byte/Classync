@@ -25,6 +25,12 @@
 // jadwal detak disimpan di localStorage, bukan hanya di pewaktu halaman.
 // Tanpa itu, pada jam sibuk pewaktunya selalu terulang dari nol, dan kiosk
 // tampak diam justru saat paling ramai.
+//
+// Kalau skrip absen sidik jari (sj_absen_klien.php) sedang menangkap, detak
+// ikut memuat keadaan pembaca menurut ADC. Jembatan memeriksa alatnya lewat
+// Windows, dan pada uji 5 Oktober 2026 pembaca pernah hilang dari ADC selagi
+// Windows masih melaporkannya terpasang. Tanpa skrip absen itu, kiriman detak
+// sama persis dengan sebelumnya.
 
 if (!function_exists('sjDetakKlienAktif')) {
     // Benar kalau server punya setidaknya satu perangkat yang boleh berdetak.
@@ -166,6 +172,19 @@ if (!sjDetakKlienAktif()) {
         return hasil.isi && typeof hasil.isi.message === 'string' ? ': ' + hasil.isi.message : ' (jawaban ' + hasil.kode + ')';
     }
 
+    // Keadaan pembaca menurut ADC, dari skrip absen sidik jari kalau ada:
+    // 1, 0, atau null kalau tidak diketahui. Galat di sana tidak boleh
+    // menggagalkan detak.
+    function keadaanAdc() {
+        try {
+            var absen = window.SjAbsenKiosk;
+            var nilai = absen && typeof absen.adc === 'function' ? absen.adc() : null;
+            return nilai === 0 || nilai === 1 ? nilai : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     var coba = 0;       // kapan detak terakhir dimulai
     var selesai = 0;    // kapan detak terakhir selesai, berhasil atau tidak
 
@@ -185,20 +204,33 @@ if (!sjDetakKlienAktif()) {
         if (!tantangan || tantangan.kode !== 200 || !tantangan.isi) {
             return 'server tidak memberi tantangan' + alasan(tantangan);
         }
-        var tanda = await panggil(JEMBATAN + '/detak', { tantangan: tantangan.isi.tantangan });
+        var kirimanTanda = { tantangan: tantangan.isi.tantangan };
+        var adc = keadaanAdc();
+        if (adc !== null) {
+            kirimanTanda.adc = adc;
+        }
+        var tanda = await panggil(JEMBATAN + '/detak', kirimanTanda);
         if (!tanda || tanda.kode !== 200 || !tanda.isi) {
             return 'jembatan tidak menandatangani detak' + alasan(tanda);
         }
         // Dihitung selesai sejak dikirim: kalau halaman dimuat ulang sebelum
         // jawabannya tiba, detak ini tidak diulang 15 detik kemudian.
         selesai = tandai(KUNCI_SELESAI);
-        var hasil = await panggil('api/sj_detak.php', {
+        var kirimanDetak = {
             perangkat: tanda.isi.perangkat,
             tantangan: tantangan.isi.tantangan,
             alat: tanda.isi.alat,
             tanda_tangan: tanda.isi.tanda_tangan,
             versi: status.isi.versi
-        }, true);
+        };
+        // adc diteruskan dari jawaban jembatan, bukan dari nilai yang dikirim
+        // halaman ini: jembatan sebelum 0.4.0 mengabaikan adc dan
+        // menandatangani pesan bentuk lama. Dengan begitu yang sampai ke
+        // server selalu sama dengan yang ditandatangani.
+        if (tanda.isi.adc === 0 || tanda.isi.adc === 1) {
+            kirimanDetak.adc = tanda.isi.adc;
+        }
+        var hasil = await panggil('api/sj_detak.php', kirimanDetak, true);
         if (!hasil || hasil.kode !== 200) {
             return 'server menolak detak' + alasan(hasil);
         }
