@@ -173,7 +173,11 @@ $konselor = $terhubung && $laporan['nama_guru'] !== null ? $laporan['nama_guru']
 
 <div class="d-flex justify-content-between align-items-center mb-3 bk-tanpa-cetak">
     <a href="pusat_layanan_bk.php" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Kembali</a>
-    <button type="button" class="btn btn-primary" onclick="window.print()"><i class="bi bi-printer"></i> Cetak</button>
+    <div class="d-flex gap-2">
+        <a href="ubah_konseling.php?jenis=<?php echo $jenis; ?>&amp;id=<?php echo (int)$id; ?>" class="btn btn-outline-primary"><i class="bi bi-pencil"></i> Ubah</a>
+        <a href="ubah_konseling.php?jenis=<?php echo $jenis; ?>&amp;id=<?php echo (int)$id; ?>#hapus" class="btn btn-outline-danger"><i class="bi bi-trash"></i> Hapus</a>
+        <button type="button" class="btn btn-primary" onclick="window.print()"><i class="bi bi-printer"></i> Cetak</button>
+    </div>
 </div>
 
 <div class="bk-cetak-saja text-center mb-3">
