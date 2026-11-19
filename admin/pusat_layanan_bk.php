@@ -191,6 +191,7 @@ try {
                                     </div>
                                     <div class="text-end">
                                         <a href="ubah_jurnal_bk.php?absensi_id=<?php echo (int)$row['absensi_id']; ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> Ubah jurnal</a>
+                                        <a href="hapus_jurnal_bk.php?absensi_id=<?php echo (int)$row['absensi_id']; ?>" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Hapus jurnal</a>
                                     </div>
                                 </td>
                             </tr>
