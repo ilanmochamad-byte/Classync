@@ -900,6 +900,186 @@ berjalan tanpa kolom `adc`: detak lalu dicatat tanpa nilai itu.
       PRIMARY KEY (id), KEY waktu (waktu));
     ALTER TABLE detak_kiosk ADD COLUMN adc TINYINT NULL DEFAULT NULL;
 
+## Layanan BK: jurnal, laporan konseling, dan koreksi dari panel web
+
+Tahap 1 perbaikan fitur BK dikerjakan 19 November 2026, di PR #34–#40.
+Isinya panel web saja: escape buku pribadi, detail laporan, rincian jurnal,
+riwayat layanan per siswa, serta koreksi dan hapus. Tahap 2 (API), 3
+(aplikasi lewat OTA), 4 (struktur), dan 5 (autentikasi) belum dimulai;
+rencananya di akhir bagian ini.
+
+**Satu jurnal BK = satu baris `absensi` bertipe `bimbingan` ditambah satu
+baris `jurnal_bk`.**
+
+- `jurnal_bk.absensi_guru_id` ber-FK ke `absensi.id` dengan
+  `ON DELETE CASCADE`.
+- Honor BK dihitung per baris `absensi` itu, bukan dari isi jurnal: Hadir dan
+  Sakit penuh, Izin 75%, status lain nol.
+- Kunci duplikat BK tetap seperti di "Aturan honor per jenis absensi":
+  guru, tanggal, `topik_tema`, dan `sasaran_layanan`.
+
+**Laporan konseling ada di `konseling_individu` dan `konseling_kelompok`.**
+
+- Kolom `jurnal_bk_id` di keduanya berisi **`absensi.id`**, bukan
+  `jurnal_bk.id`. Aplikasi mengirim `item.id` dari `get_riwayat_jurnal.php`,
+  yaitu `a.id`. Kolomnya tanpa FK, tanpa indeks, dan tanpa batasan unik.
+  Namanya jangan diganti; aplikasi lama mengirim kunci itu.
+- Laporan tidak dihitung honor.
+- Tidak ada tabel BK yang menyimpan `siswa_id`. Penghubung ke siswa hanya
+  teks bebas: `sasaran_layanan`, `nama_konseli`, `anggota_kelompok`.
+  - Nama sering ditulis sebagian atau dengan ejaan berbeda.
+  - Kelas ditulis "XI DKV", "XI-DKV", "x Dkv", dan seterusnya, sedangkan
+    `siswa.kelas` berbentuk "11-DKV" dan naik setiap tahun. Kelas tidak bisa
+    dicocokkan.
+  - Karena itu riwayat per siswa di panel web hanya "kemungkinan terkait",
+    lihat di bawah.
+
+**Keputusan kepala sekolah, 19 November 2026:**
+
+1. Semua admin boleh membaca laporan konseling lengkap di panel web.
+2. Jurnal dan laporan boleh dikoreksi, dan koreksi tidak memengaruhi honor.
+   Menghapus jurnal berarti mengurangi satu bayaran.
+3. Satu jurnal hanya boleh punya satu laporan: individu ATAU kelompok.
+
+**58 laporan ber-`jurnal_bk_id` 0 adalah baris kosong, bukan laporan guru.**
+
+- Sensus produksi 19 November 2026: 25 individu dan 33 kelompok. Semuanya
+  tanpa satu kolom pun terisi, dan yang terakhir tercatat 19 Oktober 2026.
+- Penyebabnya, kedua `proses_konseling_*.php` di repo API hanya menghentikan
+  OPTIONS. GET, HEAD, atau POST kosong lolos ke `INSERT` dengan id 0 dan
+  string kosong. Pemindai atau siapa pun yang membuka URL-nya membuat satu
+  baris.
+- Aplikasi tidak pernah mengirim id 0: satu-satunya jalan masuk ke layar
+  konseling, di semua versi, adalah `riwayat_jurnal.tsx`, yang mengirim id
+  sungguhan.
+- Panel web tidak menampilkannya, karena tidak ada `absensi` ber-id 0.
+- Jangan menguji kedua endpoint itu dengan membuka URL-nya, termasuk
+  `curl -I`: setiap permintaan menambah satu baris.
+- Penolakannya direncanakan di tahap 2 (langkah 7). Pembersihannya menunggu
+  sesudah itu, dan keputusannya ada di pengguna.
+
+Jurnal 2478 punya dua laporan individu yang sama-sama berisi. Guru BK yang
+memilih satu, lalu yang lain dihapus lewat halaman detail. Per catatan ini
+hal itu belum dilaporkan selesai.
+
+**Halaman panel web**, semuanya untuk admin yang login:
+
+| Halaman | Isi |
+|---|---|
+| `admin/pusat_layanan_bk.php` | Tab Jurnal Harian: kolom Laporan (tautan, "Belum ada", lencana "N laporan") dan baris Rincian berisi tujuh isian jurnal, tombol Ubah jurnal, dan tombol Hapus jurnal. Tab Konseling: tombol Detail. |
+| `admin/detail_konseling.php` | Satu laporan lengkap beserta jurnalnya, bisa dicetak. Memperingatkan jurnal yang punya lebih dari satu laporan, dan laporan yang tidak terhubung. Tombol Ubah dan Hapus. |
+| `admin/buku_pribadi.php` | Profil BK siswa, ditambah kartu "Riwayat Layanan BK (kemungkinan terkait)". |
+| `admin/ubah_jurnal_bk.php` | Koreksi sepuluh isian `jurnal_bk`. Baris `absensi` tidak bisa diubah. |
+| `admin/ubah_konseling.php` | Koreksi isian laporan, atau hapus satu laporan. |
+| `admin/hapus_jurnal_bk.php` | Hapus satu jurnal. **Mengurangi honor.** |
+
+**Riwayat "kemungkinan terkait" di buku pribadi:**
+
+- Nama siswa dipecah per kata. Kata umum (Muhamad, Muhammad, Siti, Nur,
+  Ahmad, Abdul, dan sejenisnya) dan kata kurang dari 3 huruf diabaikan.
+- Sebuah jurnal muncul kalau salah satu kata itu ada **utuh**, tanpa
+  membedakan huruf besar-kecil, di ketiga teks tadi. Urutannya menurut
+  jumlah kata yang cocok.
+- Halaman menampilkan teks tempat nama ditemukan, supaya admin menilai
+  sendiri.
+- Ejaan berbeda tidak terdeteksi, dan layanan per kelas tidak ditampilkan.
+  Penyelesaian tepatnya tabel penghubung di tahap 4.
+- Pencocokan di aplikasi (`get_buku_pribadi_bk.php`, `LIKE` nama lengkap
+  atau kelas) berbeda dan tidak disentuh.
+
+**Koreksi dan hapus.** Ketiga halaman koreksi memakai pola yang sama:
+
+- token CSRF di `$_SESSION['koreksi_bk_csrf']`;
+- data dan baris lognya disimpan dalam satu transaksi, jadi kalau log gagal
+  ditulis, perubahannya batal;
+- galat basis data masuk `classync/error_log` berawalan `[ubah_jurnal_bk]`,
+  `[ubah_konseling]`, atau `[hapus_jurnal_bk]`, dan admin hanya melihat
+  pesan umum;
+- beda yang hanya CRLF atau spasi di tepi (juga NULL lawan kosong) tidak
+  dihitung sebagai perubahan;
+- pesan untuk admin dilempar sebagai `DomainException`, bukan
+  `RuntimeException`. `mysqli_sql_exception` turunan `RuntimeException`, jadi
+  menangkap `RuntimeException` untuk ditampilkan membocorkan pesan galat
+  basis data. Ini sempat terjadi saat uji lokal 5.1.
+
+Aturan per halaman:
+
+- **Ubah jurnal** menolak topik dan sasaran yang sama persis dengan jurnal
+  lain milik guru yang sama di tanggal yang sama, supaya kunci duplikat BK
+  tetap berlaku.
+- **Hapus laporan** tidak menyentuh jurnal maupun honor. Dipakai untuk
+  menegakkan keputusan 3.
+- **Hapus jurnal** menampilkan konfirmasi lebih dulu: besar pengurangan honor
+  mengikuti `hitungHonorBulan()`, ditambah peringatan kalau bulannya sudah
+  lewat ("mungkin sudah dibayar, koordinasikan dengan bendahara"). Centang
+  konfirmasi wajib. Yang ikut terhapus:
+  - laporan individu dan kelompok;
+  - `jurnal_bk`;
+  - `likes`, `dislikes`, dan `comments` galeri foto absensi itu. Ketiganya
+    ber-FK ke `absensi` dengan `ON DELETE CASCADE`, jadi basis data
+    menghapusnya sendiri.
+
+  Berkas foto bukti **tidak** dihapus, karena foto itu bukti honor.
+
+**Log koreksi.** Setiap ubah dan hapus mencatat satu baris di
+`log_koreksi_bk`.
+
+- `kolom_diubah` berisi daftar kolom yang berubah, atau ringkasan jumlah
+  untuk hapus jurnal. Daftar yang lebih dari 255 karakter dipotong.
+- `sebelum` berisi salinan JSON semua baris sebelum diubah atau dihapus,
+  termasuk isi laporan konseling, likes, dan comments. Jurnal yang terhapus
+  keliru dipulihkan dari sana.
+- Isi `sebelum` hanya boleh ada di basis data. Jangan menyalinnya ke Git, PR,
+  `error_log`, atau percakapan.
+
+**Batas di aplikasi.** Aplikasi menyimpan tanda "laporan sudah dibuat" di HP
+(AsyncStorage `submitted_ind_<id>` dan `submitted_kel_<id>`). Laporan yang
+dihapus dari panel web tidak bisa dibuat ulang lewat HP yang dipakai
+menyimpannya, sampai tombol Tindak Lanjut membaca statusnya dari server
+(langkah 9).
+
+Diuji lokal, dengan struktur tabel produksi dan data buatan. Hapus jurnal juga
+diuji dengan `hitungHonorBulan()` asli: honor bulan itu turun tepat satu kali
+honor BK untuk Hadir, 75% untuk Izin, dan tetap untuk Ditolak. Belum
+dilaporkan teruji di produksi, per catatan ini:
+
+- klik Detail dan Cetak ke PDF;
+- rincian jurnal dan lencana jurnal 2478;
+- riwayat "kemungkinan terkait" pada siswa sungguhan;
+- ubah jurnal dan ubah laporan, beserta baris lognya;
+- hapus laporan pada kasus 2478;
+- hapus jurnal, yang harus diuji dengan **jurnal uji**, bukan jurnal
+  sungguhan.
+
+Rencana sesudah tahap 1:
+
+- **Tahap 2, API, hanya menambah:**
+  - `get_riwayat_jurnal.php` mengirim bidang, waktu, sumber, media, dan tanda
+    sudah ada laporan;
+  - kedua `proses_konseling_*.php` menolak id 0, permintaan selain POST,
+    kiriman kosong, dan laporan kedua untuk jurnal yang sama lintas jenis,
+    dengan bentuk galat yang sudah dipakai.
+- **Tahap 3, aplikasi lewat OTA (uji di `preview` dulu):** cetakan PDF khusus
+  BK, Tindak Lanjut membaca status dari server, tujuh isian profil yang belum
+  tampil, dan menu Konseling mengikuti `is_bk` dengan NIK lama sebagai
+  cadangan.
+- **Tahap 4, struktur:** indeks lalu batasan unik pada `jurnal_bk_id` setelah
+  data bersih, dan tabel penghubung layanan ke `siswa.id`.
+- **Tahap 5:** `get_buku_pribadi_bk.php` ditutup bersama fase D autentikasi.
+
+Tahap 1 butuh satu tabel yang dibuat manual di phpMyAdmin, jadi tidak ada di
+repo. Tanpa tabel ini ketiga halaman koreksi selalu gagal dengan aman, tanpa
+mengubah apa pun. Per catatan ini, pembuatannya di produksi belum dilaporkan.
+
+    CREATE TABLE log_koreksi_bk (
+      id INT NOT NULL AUTO_INCREMENT, waktu DATETIME NOT NULL, admin_id INT NOT NULL,
+      aksi ENUM('ubah_jurnal','ubah_laporan','hapus_laporan','hapus_jurnal') NOT NULL,
+      absensi_id INT NOT NULL,
+      laporan_jenis ENUM('individu','kelompok') NULL, laporan_id INT NULL,
+      kolom_diubah VARCHAR(255) NOT NULL DEFAULT '',
+      sebelum LONGTEXT NULL,
+      PRIMARY KEY (id), KEY waktu (waktu), KEY absensi_id (absensi_id));
+
 ## Temuan audit
 
 Daftar ini ditinjau audit independen pada 14 September 2026, di luar pekerjaan
