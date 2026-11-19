@@ -105,14 +105,14 @@ $bk = $stmt_bk->get_result()->fetch_assoc() ?: []; // Jika kosong, set array kos
 
 <?php if($pesan): ?>
     <div class="alert alert-<?php echo $tipe_pesan; ?> alert-dismissible fade show">
-        <?php echo $pesan; ?>
+        <?php echo htmlspecialchars($pesan, ENT_QUOTES, 'UTF-8'); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 <?php endif; ?>
 
 <div class="card shadow-sm mb-4">
     <div class="card-header bg-light">
-        <strong>Identitas Utama:</strong> <?php echo $data_siswa['nama_siswa']; ?> | NISN: <?php echo $data_siswa['nisn']; ?> | Kelas: <?php echo $data_siswa['kelas']; ?>
+        <strong>Identitas Utama:</strong> <?php echo htmlspecialchars((string)$data_siswa['nama_siswa'], ENT_QUOTES, 'UTF-8'); ?> | NISN: <?php echo htmlspecialchars((string)$data_siswa['nisn'], ENT_QUOTES, 'UTF-8'); ?> | Kelas: <?php echo htmlspecialchars((string)$data_siswa['kelas'], ENT_QUOTES, 'UTF-8'); ?>
     </div>
     <div class="card-body">
         
@@ -133,72 +133,72 @@ $bk = $stmt_bk->get_result()->fetch_assoc() ?: []; // Jika kosong, set array kos
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label>Nama Ayah</label>
-                            <input type="text" name="nama_ayah" class="form-control" value="<?php echo $bk['nama_ayah'] ?? ''; ?>">
+                            <input type="text" name="nama_ayah" class="form-control" value="<?php echo htmlspecialchars((string)($bk['nama_ayah'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label>Pekerjaan Ayah</label>
-                            <input type="text" name="pekerjaan_ayah" class="form-control" value="<?php echo $bk['pekerjaan_ayah'] ?? ''; ?>">
+                            <input type="text" name="pekerjaan_ayah" class="form-control" value="<?php echo htmlspecialchars((string)($bk['pekerjaan_ayah'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label>Nama Ibu</label>
-                            <input type="text" name="nama_ibu" class="form-control" value="<?php echo $bk['nama_ibu'] ?? ''; ?>">
+                            <input type="text" name="nama_ibu" class="form-control" value="<?php echo htmlspecialchars((string)($bk['nama_ibu'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label>Pekerjaan Ibu</label>
-                            <input type="text" name="pekerjaan_ibu" class="form-control" value="<?php echo $bk['pekerjaan_ibu'] ?? ''; ?>">
+                            <input type="text" name="pekerjaan_ibu" class="form-control" value="<?php echo htmlspecialchars((string)($bk['pekerjaan_ibu'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         </div>
                         <div class="col-md-4 mb-3">
                             <label>Jumlah Saudara</label>
-                            <input type="number" name="jumlah_saudara" class="form-control" value="<?php echo $bk['jumlah_saudara'] ?? ''; ?>">
+                            <input type="number" name="jumlah_saudara" class="form-control" value="<?php echo htmlspecialchars((string)($bk['jumlah_saudara'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         </div>
                         <div class="col-md-4 mb-3">
                             <label>Anak Ke-</label>
-                            <input type="number" name="anak_ke" class="form-control" value="<?php echo $bk['anak_ke'] ?? ''; ?>">
+                            <input type="number" name="anak_ke" class="form-control" value="<?php echo htmlspecialchars((string)($bk['anak_ke'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         </div>
                         <div class="col-md-4 mb-3">
                             <label>Kondisi Keluarga (Utuh/Cerai/dll)</label>
-                            <input type="text" name="kondisi_keluarga" class="form-control" value="<?php echo $bk['kondisi_keluarga'] ?? ''; ?>">
+                            <input type="text" name="kondisi_keluarga" class="form-control" value="<?php echo htmlspecialchars((string)($bk['kondisi_keluarga'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                         </div>
                     </div>
                 </div>
 
                 <div class="tab-pane container fade px-0" id="pendidikan">
                     <div class="row">
-                        <div class="col-md-6 mb-3"><label>Riwayat SD</label><input type="text" name="riwayat_sd" class="form-control" value="<?php echo $bk['riwayat_sd'] ?? ''; ?>"></div>
-                        <div class="col-md-6 mb-3"><label>Riwayat SMP</label><input type="text" name="riwayat_smp" class="form-control" value="<?php echo $bk['riwayat_smp'] ?? ''; ?>"></div>
-                        <div class="col-md-6 mb-3"><label>Prestasi Akademik</label><textarea name="prestasi_akademik" class="form-control" rows="3"><?php echo $bk['prestasi_akademik'] ?? ''; ?></textarea></div>
-                        <div class="col-md-6 mb-3"><label>Prestasi Non-Akademik</label><textarea name="prestasi_non_akademik" class="form-control" rows="3"><?php echo $bk['prestasi_non_akademik'] ?? ''; ?></textarea></div>
+                        <div class="col-md-6 mb-3"><label>Riwayat SD</label><input type="text" name="riwayat_sd" class="form-control" value="<?php echo htmlspecialchars((string)($bk['riwayat_sd'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-6 mb-3"><label>Riwayat SMP</label><input type="text" name="riwayat_smp" class="form-control" value="<?php echo htmlspecialchars((string)($bk['riwayat_smp'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-6 mb-3"><label>Prestasi Akademik</label><textarea name="prestasi_akademik" class="form-control" rows="3"><?php echo htmlspecialchars((string)($bk['prestasi_akademik'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea></div>
+                        <div class="col-md-6 mb-3"><label>Prestasi Non-Akademik</label><textarea name="prestasi_non_akademik" class="form-control" rows="3"><?php echo htmlspecialchars((string)($bk['prestasi_non_akademik'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea></div>
                     </div>
                 </div>
 
                 <div class="tab-pane container fade px-0" id="pribadi">
                     <div class="row">
-                        <div class="col-md-6 mb-3"><label>Kesehatan / Penyakit</label><textarea name="kesehatan" class="form-control"><?php echo $bk['kesehatan'] ?? ''; ?></textarea></div>
-                        <div class="col-md-6 mb-3"><label>Kebiasaan Sehari-hari</label><textarea name="kebiasaan" class="form-control"><?php echo $bk['kebiasaan'] ?? ''; ?></textarea></div>
-                        <div class="col-md-6 mb-3"><label>Kelebihan Diri</label><textarea name="kelebihan" class="form-control"><?php echo $bk['kelebihan'] ?? ''; ?></textarea></div>
-                        <div class="col-md-6 mb-3"><label>Kekurangan Diri</label><textarea name="kekurangan" class="form-control"><?php echo $bk['kekurangan'] ?? ''; ?></textarea></div>
-                        <div class="col-md-4 mb-3"><label>Hubungan Teman</label><input type="text" name="hubungan_teman" class="form-control" value="<?php echo $bk['hubungan_teman'] ?? ''; ?>"></div>
-                        <div class="col-md-4 mb-3"><label>Organisasi</label><input type="text" name="organisasi" class="form-control" value="<?php echo $bk['organisasi'] ?? ''; ?>"></div>
-                        <div class="col-md-4 mb-3"><label>Pergaulan</label><input type="text" name="pergaulan" class="form-control" value="<?php echo $bk['pergaulan'] ?? ''; ?>"></div>
+                        <div class="col-md-6 mb-3"><label>Kesehatan / Penyakit</label><textarea name="kesehatan" class="form-control"><?php echo htmlspecialchars((string)($bk['kesehatan'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea></div>
+                        <div class="col-md-6 mb-3"><label>Kebiasaan Sehari-hari</label><textarea name="kebiasaan" class="form-control"><?php echo htmlspecialchars((string)($bk['kebiasaan'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea></div>
+                        <div class="col-md-6 mb-3"><label>Kelebihan Diri</label><textarea name="kelebihan" class="form-control"><?php echo htmlspecialchars((string)($bk['kelebihan'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea></div>
+                        <div class="col-md-6 mb-3"><label>Kekurangan Diri</label><textarea name="kekurangan" class="form-control"><?php echo htmlspecialchars((string)($bk['kekurangan'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea></div>
+                        <div class="col-md-4 mb-3"><label>Hubungan Teman</label><input type="text" name="hubungan_teman" class="form-control" value="<?php echo htmlspecialchars((string)($bk['hubungan_teman'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-4 mb-3"><label>Organisasi</label><input type="text" name="organisasi" class="form-control" value="<?php echo htmlspecialchars((string)($bk['organisasi'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-4 mb-3"><label>Pergaulan</label><input type="text" name="pergaulan" class="form-control" value="<?php echo htmlspecialchars((string)($bk['pergaulan'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
                     </div>
                 </div>
 
                 <div class="tab-pane container fade px-0" id="belajar">
                     <div class="row">
-                        <div class="col-md-6 mb-3"><label>Mapel Favorit</label><input type="text" name="mapel_favorit" class="form-control" value="<?php echo $bk['mapel_favorit'] ?? ''; ?>"></div>
-                        <div class="col-md-6 mb-3"><label>Mapel Sulit</label><input type="text" name="mapel_sulit" class="form-control" value="<?php echo $bk['mapel_sulit'] ?? ''; ?>"></div>
-                        <div class="col-md-6 mb-3"><label>Gaya Belajar</label><input type="text" name="gaya_belajar" class="form-control" placeholder="Visual/Auditori/Kinestetik" value="<?php echo $bk['gaya_belajar'] ?? ''; ?>"></div>
-                        <div class="col-md-6 mb-3"><label>Motivasi Belajar</label><input type="text" name="motivasi" class="form-control" value="<?php echo $bk['motivasi'] ?? ''; ?>"></div>
-                        <div class="col-md-4 mb-3"><label>Cita-cita</label><input type="text" name="cita_cita" class="form-control" value="<?php echo $bk['cita_cita'] ?? ''; ?>"></div>
-                        <div class="col-md-4 mb-3"><label>Minat Karir</label><input type="text" name="minat_karir" class="form-control" value="<?php echo $bk['minat_karir'] ?? ''; ?>"></div>
-                        <div class="col-md-4 mb-3"><label>Rencana Setelah Lulus</label><input type="text" name="rencana_lulus" class="form-control" value="<?php echo $bk['rencana_lulus'] ?? ''; ?>"></div>
+                        <div class="col-md-6 mb-3"><label>Mapel Favorit</label><input type="text" name="mapel_favorit" class="form-control" value="<?php echo htmlspecialchars((string)($bk['mapel_favorit'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-6 mb-3"><label>Mapel Sulit</label><input type="text" name="mapel_sulit" class="form-control" value="<?php echo htmlspecialchars((string)($bk['mapel_sulit'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-6 mb-3"><label>Gaya Belajar</label><input type="text" name="gaya_belajar" class="form-control" placeholder="Visual/Auditori/Kinestetik" value="<?php echo htmlspecialchars((string)($bk['gaya_belajar'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-6 mb-3"><label>Motivasi Belajar</label><input type="text" name="motivasi" class="form-control" value="<?php echo htmlspecialchars((string)($bk['motivasi'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-4 mb-3"><label>Cita-cita</label><input type="text" name="cita_cita" class="form-control" value="<?php echo htmlspecialchars((string)($bk['cita_cita'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-4 mb-3"><label>Minat Karir</label><input type="text" name="minat_karir" class="form-control" value="<?php echo htmlspecialchars((string)($bk['minat_karir'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
+                        <div class="col-md-4 mb-3"><label>Rencana Setelah Lulus</label><input type="text" name="rencana_lulus" class="form-control" value="<?php echo htmlspecialchars((string)($bk['rencana_lulus'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"></div>
                     </div>
                 </div>
 
                 <div class="tab-pane container fade px-0" id="perkembangan">
                     <div class="mb-3">
                         <label>J. Catatan Perkembangan Siswa</label>
-                        <textarea name="catatan_perkembangan" class="form-control" rows="6" placeholder="Uraian perkembangan siswa dari waktu ke waktu..."><?php echo $bk['catatan_perkembangan'] ?? ''; ?></textarea>
+                        <textarea name="catatan_perkembangan" class="form-control" rows="6" placeholder="Uraian perkembangan siswa dari waktu ke waktu..."><?php echo htmlspecialchars((string)($bk['catatan_perkembangan'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
                     </div>
                 </div>
                 
