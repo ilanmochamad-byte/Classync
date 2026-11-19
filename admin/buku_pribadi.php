@@ -215,4 +215,154 @@ $bk = $stmt_bk->get_result()->fetch_assoc() ?: []; // Jika kosong, set array kos
     </div>
 </div>
 
+<?php
+// --- RIWAYAT LAYANAN BK (KEMUNGKINAN TERKAIT) ---
+// Jurnal BK dan laporan konseling tidak menyimpan siswa_id. Penghubungnya
+// hanya teks bebas yang diketik guru BK: sasaran_layanan, nama_konseli, dan
+// anggota_kelompok. Nama sering ditulis sebagian, dan kelas ditulis dalam
+// bentuk yang tidak sama dengan kolom siswa.kelas (mis. "XI DKV" lawan
+// "11-DKV"), jadi hasil di bawah ini perkiraan untuk dinilai admin, bukan
+// riwayat pasti. Penyelesaian tepatnya tabel penghubung ke siswa.id
+// (tahap 4 perbaikan BK).
+//
+// Aturannya: nama siswa dipecah per kata; kata umum dan kata < 3 huruf
+// diabaikan. Sebuah jurnal dianggap mungkin terkait kalau salah satu kata
+// itu muncul UTUH (tanpa membedakan huruf besar-kecil) di salah satu teks
+// tadi. Urutan menurut jumlah kata yang cocok, lalu tanggal.
+$bk_kata_umum = ['muhamad', 'muhammad', 'mohamad', 'mohammad', 'moh', 'muh', 'siti', 'nur', 'ahmad', 'abdul', 'bin', 'binti', 'dan'];
+$bk_pecah_kata = function ($teks) {
+    $kata = preg_split('/[^\p{L}]+/u', mb_strtolower((string)$teks, 'UTF-8'), -1, PREG_SPLIT_NO_EMPTY);
+    return $kata ?: [];
+};
+$kata_nama = [];
+foreach ($bk_pecah_kata($data_siswa['nama_siswa']) as $kata) {
+    if (mb_strlen($kata, 'UTF-8') >= 3 && !in_array($kata, $bk_kata_umum, true)) {
+        $kata_nama[$kata] = true;
+    }
+}
+$kata_nama = array_keys($kata_nama);
+
+$riwayat = [];
+if ($kata_nama) {
+    // Laporan dibaca terpisah, bukan GROUP_CONCAT, supaya anggota_kelompok
+    // yang panjang tidak terpotong group_concat_max_len.
+    $laporan_per_jurnal = [];
+    $res_ind = $conn->query("SELECT id, jurnal_bk_id, nama_konseli FROM konseling_individu WHERE jurnal_bk_id > 0 ORDER BY id");
+    while ($l = $res_ind->fetch_assoc()) {
+        $laporan_per_jurnal[(int)$l['jurnal_bk_id']][] = ['individu', (int)$l['id'], 'Nama konseli', (string)$l['nama_konseli']];
+    }
+    $res_kel = $conn->query("SELECT id, jurnal_bk_id, anggota_kelompok FROM konseling_kelompok WHERE jurnal_bk_id > 0 ORDER BY id");
+    while ($l = $res_kel->fetch_assoc()) {
+        $laporan_per_jurnal[(int)$l['jurnal_bk_id']][] = ['kelompok', (int)$l['id'], 'Anggota kelompok', (string)$l['anggota_kelompok']];
+    }
+
+    $res_jurnal = $conn->query(
+        "SELECT a.id AS absensi_id, a.waktu_absensi, g.nama_guru, j.komponen_layanan, j.topik_tema, j.sasaran_layanan
+         FROM jurnal_bk j
+         JOIN absensi a ON a.id = j.absensi_guru_id
+         LEFT JOIN guru g ON g.id = a.guru_id
+         WHERE a.tipe_absensi = 'bimbingan'
+         ORDER BY a.waktu_absensi DESC, a.id DESC");
+    while ($j = $res_jurnal->fetch_assoc()) {
+        $laporan = $laporan_per_jurnal[(int)$j['absensi_id']] ?? [];
+        $sumber = [['Sasaran layanan', (string)$j['sasaran_layanan']]];
+        foreach ($laporan as [$jenis_lap, $id_lap, $label_lap, $teks_lap]) {
+            $sumber[] = [$label_lap . ' (' . $jenis_lap . ' #' . $id_lap . ')', $teks_lap];
+        }
+
+        $cocok = [];
+        $temuan = [];
+        foreach ($sumber as [$label_sumber, $teks_sumber]) {
+            $kata_cocok = array_intersect($kata_nama, $bk_pecah_kata($teks_sumber));
+            if (!$kata_cocok) {
+                continue;
+            }
+            $cocok += array_flip($kata_cocok);
+            // Teks panjang (daftar anggota) dipersempit ke baris yang memuat nama.
+            $baris_cocok = [];
+            foreach (preg_split('/\R/u', $teks_sumber) as $baris) {
+                if (array_intersect($kata_nama, $bk_pecah_kata($baris))) {
+                    $baris_cocok[] = trim($baris);
+                }
+            }
+            $temuan[] = [$label_sumber, implode("\n", $baris_cocok)];
+        }
+        if ($cocok) {
+            $j['skor'] = count($cocok);
+            $j['temuan'] = $temuan;
+            $j['laporan'] = $laporan;
+            $riwayat[] = $j;
+        }
+    }
+    // usort stabil sejak PHP 8.0, jadi urutan tanggal tetap di dalam skor yang sama.
+    usort($riwayat, fn($x, $y) => $y['skor'] <=> $x['skor']);
+}
+?>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-light">
+        <strong>Riwayat Layanan BK</strong> <span class="text-muted">(kemungkinan terkait)</span>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info small">
+            Jurnal dan laporan BK tidak menyimpan identitas siswa. Daftar ini dicocokkan dari teks nama yang
+            ditulis guru BK, jadi <strong>bisa keliru</strong>: nama dengan ejaan berbeda tidak terdeteksi, dan
+            siswa lain yang namanya sama bisa ikut muncul. Periksa kolom "Ditemukan di" sebelum menyimpulkan.
+            Layanan untuk satu kelas tidak ditampilkan.
+        </div>
+
+        <?php if (!$kata_nama): ?>
+            <p class="text-muted mb-0">Nama siswa ini hanya berisi kata umum, sehingga tidak bisa dicocokkan.</p>
+        <?php elseif (!$riwayat): ?>
+            <p class="text-muted mb-0">Tidak ditemukan layanan BK yang menyebut nama siswa ini.</p>
+        <?php else: ?>
+            <p class="small text-muted">
+                Kata nama yang dicari: <?php echo htmlspecialchars(implode(', ', $kata_nama), ENT_QUOTES, 'UTF-8'); ?>.
+                Ditemukan <?php echo count($riwayat); ?> jurnal.
+            </p>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Tanggal</th>
+                            <th>Layanan</th>
+                            <th>Konselor</th>
+                            <th>Ditemukan di</th>
+                            <th>Laporan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($riwayat as $r): ?>
+                        <tr>
+                            <td class="small text-nowrap"><?php echo date('d/m/Y H:i', strtotime($r['waktu_absensi'])); ?></td>
+                            <td>
+                                <span class="badge bg-info text-dark mb-1"><?php echo htmlspecialchars((string)$r['komponen_layanan'], ENT_QUOTES, 'UTF-8'); ?></span><br>
+                                <?php echo htmlspecialchars((string)$r['topik_tema'], ENT_QUOTES, 'UTF-8'); ?>
+                            </td>
+                            <td><?php echo htmlspecialchars((string)($r['nama_guru'] ?? '-'), ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td class="small">
+                                <?php foreach ($r['temuan'] as [$label_temuan, $teks_temuan]): ?>
+                                    <div class="mb-1">
+                                        <span class="text-muted"><?php echo htmlspecialchars($label_temuan, ENT_QUOTES, 'UTF-8'); ?>:</span>
+                                        <span style="white-space: pre-wrap;"><?php echo htmlspecialchars($teks_temuan, ENT_QUOTES, 'UTF-8'); ?></span>
+                                    </div>
+                                <?php endforeach; ?>
+                            </td>
+                            <td class="small">
+                                <?php foreach ($r['laporan'] as [$jenis_lap, $id_lap]): ?>
+                                    <a href="detail_konseling.php?jenis=<?php echo $jenis_lap; ?>&amp;id=<?php echo $id_lap; ?>"><?php echo ucfirst($jenis_lap); ?> #<?php echo $id_lap; ?></a><br>
+                                <?php endforeach; ?>
+                                <?php if (!$r['laporan']): ?>
+                                    <span class="text-muted">Belum ada</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
 <?php include 'partials/footer.php'; ?>
