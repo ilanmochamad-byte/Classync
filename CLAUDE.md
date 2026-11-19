@@ -904,9 +904,10 @@ berjalan tanpa kolom `adc`: detak lalu dicatat tanpa nilai itu.
 
 Tahap 1 perbaikan fitur BK dikerjakan 19 November 2026, di PR #34–#40.
 Isinya panel web saja: escape buku pribadi, detail laporan, rincian jurnal,
-riwayat layanan per siswa, serta koreksi dan hapus. Tahap 2 (API), 3
-(aplikasi lewat OTA), 4 (struktur), dan 5 (autentikasi) belum dimulai;
-rencananya di akhir bagian ini.
+riwayat layanan per siswa, serta koreksi dan hapus. Tahap 2 (API) ada di
+repo API, PR api-smkt#1 dan #2, lihat "Tahap 2" di bawah. Tahap 3 (aplikasi
+lewat OTA), 4 (struktur), dan 5 (autentikasi) belum dimulai; rencananya di
+akhir bagian ini.
 
 **Satu jurnal BK = satu baris `absensi` bertipe `bimbingan` ditambah satu
 baris `jurnal_bk`.**
@@ -953,10 +954,13 @@ baris `jurnal_bk`.**
   konseling, di semua versi, adalah `riwayat_jurnal.tsx`, yang mengirim id
   sungguhan.
 - Panel web tidak menampilkannya, karena tidak ada `absensi` ber-id 0.
-- Jangan menguji kedua endpoint itu dengan membuka URL-nya, termasuk
-  `curl -I`: setiap permintaan menambah satu baris.
-- Penolakannya direncanakan di tahap 2 (langkah 7). Pembersihannya menunggu
-  sesudah itu, dan keputusannya ada di pengguna.
+- Uji lokal mereproduksinya: satu `GET` ke versi lama membuat satu baris
+  kosong ber-id 0.
+- Sejak api-smkt#2 kedua endpoint menjawab selain POST dengan 405 sebelum
+  menyentuh basis data, jadi membuka URL-nya kini aman. Sebelum PR itu
+  di-deploy, setiap permintaan, termasuk `curl -I`, menambah satu baris.
+- Pembersihan ke-58 baris itu menunggu bukti di produksi bahwa jumlahnya
+  tidak bertambah lagi, dan keputusannya ada di pengguna.
 
 Jurnal 2478 punya dua laporan individu yang sama-sama berisi. Guru BK yang
 memilih satu, lalu yang lain dihapus lewat halaman detail. Per catatan ini
@@ -1051,14 +1055,32 @@ dilaporkan teruji di produksi, per catatan ini:
 - hapus jurnal, yang harus diuji dengan **jurnal uji**, bukan jurnal
   sungguhan.
 
-Rencana sesudah tahap 1:
+**Tahap 2, repo API, 19 November 2026.** Rinciannya di `CLAUDE.md` repo API.
 
-- **Tahap 2, API, hanya menambah:**
-  - `get_riwayat_jurnal.php` mengirim bidang, waktu, sumber, media, dan tanda
-    sudah ada laporan;
-  - kedua `proses_konseling_*.php` menolak id 0, permintaan selain POST,
-    kiriman kosong, dan laporan kedua untuk jurnal yang sama lintas jenis,
-    dengan bentuk galat yang sudah dipakai.
+- **api-smkt#1:** `get_riwayat_jurnal.php` menambah enam kunci untuk baris
+  BK: `bidang_layanan`, `waktu_layanan`, `sumber`, `media_alat`,
+  `ada_laporan_individu`, dan `ada_laporan_kelompok`. Field lama tidak
+  berubah. Ini bahan untuk tahap 3.
+- **api-smkt#2:** kedua `proses_konseling_*.php` kini menolak:
+  - permintaan selain POST (405);
+  - `jurnal_bk_id` yang bukan bilangan bulat positif, termasuk body kosong;
+  - laporan yang seluruh isiannya kosong;
+  - absensi yang bukan BK, atau yang bukan milik pemilik token;
+  - jurnal yang sudah punya laporan individu atau kelompok. Ini menegakkan
+    keputusan 3 di sisi aplikasi.
+
+  Baris `absensi` dikunci lewat PK di kedua endpoint, jadi kiriman serentak
+  lintas jenis hanya meloloskan satu. Bentuk jawabannya tetap
+  `{status, message}`, dan semua versi aplikasi menampilkan pesannya apa
+  adanya.
+
+Keduanya diuji lokal, termasuk kiriman serentak dengan
+`PHP_CLI_SERVER_WORKERS=6`. `php -S` biasa hanya punya satu worker, jadi uji
+serentak tanpa itu menyesatkan. Belum dilaporkan teruji di produksi, per
+catatan ini.
+
+Rencana sesudah tahap 2:
+
 - **Tahap 3, aplikasi lewat OTA (uji di `preview` dulu):** cetakan PDF khusus
   BK, Tindak Lanjut membaca status dari server, tujuh isian profil yang belum
   tampil, dan menu Konseling mengikuti `is_bk` dengan NIK lama sebagai
