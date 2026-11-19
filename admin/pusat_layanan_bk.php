@@ -189,6 +189,9 @@ try {
                                             </div>
                                         <?php endforeach; ?>
                                     </div>
+                                    <div class="text-end">
+                                        <a href="ubah_jurnal_bk.php?absensi_id=<?php echo (int)$row['absensi_id']; ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> Ubah jurnal</a>
+                                    </div>
                                 </td>
                             </tr>
                             <?php endwhile; else: ?>
@@ -217,7 +220,7 @@ try {
                                 <td class="small"><?php echo date('d/m/Y', strtotime($row['waktu_absensi'])); ?></td>
                                 <td><strong><?php echo htmlspecialchars($row['nama_konseli']); ?></strong><br><small class="text-muted"><?php echo htmlspecialchars($row['kelas_konseli']); ?></small></td>
                                 <td><?php echo htmlspecialchars($row['nama_guru']); ?></td>
-                                <td><div class="bg-light p-2 rounded small"><strong>Hasil:</strong> <?php echo htmlspecialchars($row['hasil_konseling']); ?><br><strong class="text-success">RTL:</strong> <?php echo htmlspecialchars($row['rtl_konselor']); ?></div></td>
+                                <td><div class="bg-light p-2 rounded small"><strong>Hasil:</strong> <?php echo htmlspecialchars((string)$row['hasil_konseling']); ?><br><strong class="text-success">RTL:</strong> <?php echo htmlspecialchars((string)$row['rtl_konselor']); ?></div></td>
                                 <td class="text-center"><a href="detail_konseling.php?jenis=individu&amp;id=<?php echo (int)$row['id']; ?>" class="btn btn-sm btn-buku-detail rounded-pill px-3"><i class="bi bi-file-earmark-text"></i> Detail</a></td>
                             </tr>
                             <?php endwhile; else: ?>
@@ -246,7 +249,7 @@ try {
                                 <td class="small"><?php echo date('d/m/Y', strtotime($row['waktu_absensi'])); ?></td>
                                 <td><strong><?php echo htmlspecialchars($row['nama_kegiatan']); ?></strong><br><small class="text-muted">Oleh: <?php echo htmlspecialchars($row['nama_guru']); ?></small></td>
                                 <td class="small"><?php echo htmlspecialchars($row['anggota_kelompok']); ?></td>
-                                <td><div class="bg-light p-2 rounded small"><strong>Hasil:</strong> <?php echo htmlspecialchars($row['hasil_kegiatan']); ?><br><strong class="text-success">RTL:</strong> <?php echo htmlspecialchars($row['rtl_konselor']); ?></div></td>
+                                <td><div class="bg-light p-2 rounded small"><strong>Hasil:</strong> <?php echo htmlspecialchars((string)$row['hasil_kegiatan']); ?><br><strong class="text-success">RTL:</strong> <?php echo htmlspecialchars((string)$row['rtl_konselor']); ?></div></td>
                                 <td class="text-center"><a href="detail_konseling.php?jenis=kelompok&amp;id=<?php echo (int)$row['id']; ?>" class="btn btn-sm btn-buku-detail rounded-pill px-3"><i class="bi bi-file-earmark-text"></i> Detail</a></td>
                             </tr>
                             <?php endwhile; else: ?>
