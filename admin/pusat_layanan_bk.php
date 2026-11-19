@@ -13,7 +13,13 @@ $bulan_indo = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli
 
 try {
     // --- 1. QUERY JURNAL BK ---
-    $sql_jurnal = "SELECT a.waktu_absensi, g.nama_guru, jbk.komponen_layanan, jbk.topik_tema, jbk.sasaran_layanan, jbk.waktu
+    // Dua subkueri terakhir mengumpulkan id laporan konseling per jurnal;
+    // jurnal_bk_id di tabel konseling berisi absensi.id. Kolom itu belum
+    // berindeks (rencana tahap 4), tapi tabelnya masih kecil.
+    $sql_jurnal = "SELECT a.id AS absensi_id, a.waktu_absensi, g.nama_guru, jbk.komponen_layanan, jbk.topik_tema, jbk.sasaran_layanan, jbk.waktu,
+                          jbk.bidang_layanan, jbk.fungsi_layanan, jbk.materi_layanan, jbk.sumber, jbk.metode_teknik, jbk.media_alat,
+                          (SELECT GROUP_CONCAT(ki.id ORDER BY ki.id) FROM konseling_individu ki WHERE ki.jurnal_bk_id = a.id) AS id_individu,
+                          (SELECT GROUP_CONCAT(kk.id ORDER BY kk.id) FROM konseling_kelompok kk WHERE kk.jurnal_bk_id = a.id) AS id_kelompok
                    FROM absensi a
                    JOIN guru g ON a.guru_id = g.id
                    JOIN jurnal_bk jbk ON a.id = jbk.absensi_guru_id
@@ -130,18 +136,63 @@ try {
                                 <th>Konselor</th>
                                 <th>Topik Layanan</th>
                                 <th>Sasaran</th>
+                                <th>Laporan</th>
+                                <th class="text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
+                            <?php $no_jurnal = 0; ?>
                             <?php if($data_jurnal->num_rows > 0): while($row = $data_jurnal->fetch_assoc()): ?>
+                            <?php
+                                $no_jurnal++;
+                                $laporan_jurnal = [];
+                                foreach (['individu' => 'id_individu', 'kelompok' => 'id_kelompok'] as $jenis_lap => $kolom_lap) {
+                                    if ($row[$kolom_lap] !== null && $row[$kolom_lap] !== '') {
+                                        foreach (explode(',', $row[$kolom_lap]) as $id_lap) {
+                                            $laporan_jurnal[] = [$jenis_lap, (int)$id_lap];
+                                        }
+                                    }
+                                }
+                            ?>
                             <tr>
                                 <td class="small"><strong><?php echo date('d M Y', strtotime($row['waktu_absensi'])); ?></strong><br><?php echo date('H:i', strtotime($row['waktu_absensi'])); ?></td>
                                 <td class="fw-bold"><?php echo htmlspecialchars($row['nama_guru']); ?></td>
                                 <td><span class="badge bg-info text-dark mb-1"><?php echo htmlspecialchars($row['komponen_layanan']); ?></span><br><?php echo htmlspecialchars($row['topik_tema']); ?></td>
                                 <td><?php echo htmlspecialchars($row['sasaran_layanan']); ?></td>
+                                <td class="small">
+                                    <?php if (count($laporan_jurnal) > 1): ?>
+                                        <span class="badge bg-danger mb-1"><?php echo count($laporan_jurnal); ?> laporan</span><br>
+                                    <?php endif; ?>
+                                    <?php foreach ($laporan_jurnal as [$jenis_lap, $id_lap]): ?>
+                                        <a href="detail_konseling.php?jenis=<?php echo $jenis_lap; ?>&amp;id=<?php echo $id_lap; ?>"><?php echo ucfirst($jenis_lap); ?> #<?php echo $id_lap; ?></a><br>
+                                    <?php endforeach; ?>
+                                    <?php if (!$laporan_jurnal): ?>
+                                        <span class="text-muted">Belum ada</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-sm btn-buku-detail rounded-pill px-3" data-bs-toggle="collapse" data-bs-target="#rincian-jurnal-<?php echo $no_jurnal; ?>" aria-expanded="false" aria-controls="rincian-jurnal-<?php echo $no_jurnal; ?>"><i class="bi bi-chevron-down"></i> Rincian</button>
+                                </td>
+                            </tr>
+                            <tr class="collapse" id="rincian-jurnal-<?php echo $no_jurnal; ?>">
+                                <td colspan="6" class="bg-light">
+                                    <div class="row small">
+                                        <?php foreach ([
+                                            ['Bidang Layanan', 'bidang_layanan'], ['Fungsi Layanan', 'fungsi_layanan'],
+                                            ['Alokasi Waktu', 'waktu'], ['Metode / Teknik', 'metode_teknik'],
+                                            ['Media / Alat', 'media_alat'], ['Sumber', 'sumber'],
+                                            ['Materi Layanan', 'materi_layanan'],
+                                        ] as [$label_rinci, $kolom_rinci]): ?>
+                                            <div class="<?php echo $kolom_rinci === 'materi_layanan' ? 'col-12' : 'col-md-6'; ?> mb-2">
+                                                <div class="text-muted fw-semibold"><?php echo $label_rinci; ?></div>
+                                                <div style="white-space: pre-wrap; word-break: break-word;"><?php echo htmlspecialchars(trim((string)$row[$kolom_rinci]) !== '' ? (string)$row[$kolom_rinci] : '-', ENT_QUOTES, 'UTF-8'); ?></div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </td>
                             </tr>
                             <?php endwhile; else: ?>
-                            <tr><td colspan="4" class="text-center text-muted py-4">Belum ada data jurnal.</td></tr>
+                            <tr><td colspan="6" class="text-center text-muted py-4">Belum ada data jurnal.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
