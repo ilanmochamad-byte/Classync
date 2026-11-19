@@ -25,7 +25,7 @@ try {
     $data_jurnal = $stmt_jurnal->get_result();
 
     // --- 2. QUERY KONSELING INDIVIDU ---
-    $sql_individu = "SELECT a.waktu_absensi, g.nama_guru, ki.nama_konseli, ki.kelas_konseli, ki.deskripsi_masalah, ki.hasil_konseling, ki.rtl_konselor
+    $sql_individu = "SELECT ki.id, a.waktu_absensi, g.nama_guru, ki.nama_konseli, ki.kelas_konseli, ki.deskripsi_masalah, ki.hasil_konseling, ki.rtl_konselor
                      FROM konseling_individu ki
                      JOIN absensi a ON ki.jurnal_bk_id = a.id
                      JOIN guru g ON a.guru_id = g.id
@@ -37,7 +37,7 @@ try {
     $data_individu = $stmt_ind->get_result();
 
     // --- 3. QUERY KONSELING KELOMPOK ---
-    $sql_kelompok = "SELECT a.waktu_absensi, g.nama_guru, kk.nama_kegiatan, kk.anggota_kelompok, kk.hasil_kegiatan, kk.rtl_konselor
+    $sql_kelompok = "SELECT kk.id, a.waktu_absensi, g.nama_guru, kk.nama_kegiatan, kk.anggota_kelompok, kk.hasil_kegiatan, kk.rtl_konselor
                      FROM konseling_kelompok kk
                      JOIN absensi a ON kk.jurnal_bk_id = a.id
                      JOIN guru g ON a.guru_id = g.id
@@ -157,6 +157,7 @@ try {
                                 <th>Siswa (Konseli)</th>
                                 <th>Konselor</th>
                                 <th>Hasil & RTL</th>
+                                <th class="text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -166,9 +167,10 @@ try {
                                 <td><strong><?php echo htmlspecialchars($row['nama_konseli']); ?></strong><br><small class="text-muted"><?php echo htmlspecialchars($row['kelas_konseli']); ?></small></td>
                                 <td><?php echo htmlspecialchars($row['nama_guru']); ?></td>
                                 <td><div class="bg-light p-2 rounded small"><strong>Hasil:</strong> <?php echo htmlspecialchars($row['hasil_konseling']); ?><br><strong class="text-success">RTL:</strong> <?php echo htmlspecialchars($row['rtl_konselor']); ?></div></td>
+                                <td class="text-center"><a href="detail_konseling.php?jenis=individu&amp;id=<?php echo (int)$row['id']; ?>" class="btn btn-sm btn-buku-detail rounded-pill px-3"><i class="bi bi-file-earmark-text"></i> Detail</a></td>
                             </tr>
                             <?php endwhile; else: ?>
-                            <tr><td colspan="4" class="text-center text-muted py-4">Belum ada data.</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted py-4">Belum ada data.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
@@ -184,6 +186,7 @@ try {
                                 <th>Nama Kegiatan</th>
                                 <th>Anggota</th>
                                 <th>Hasil & RTL</th>
+                                <th class="text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -193,9 +196,10 @@ try {
                                 <td><strong><?php echo htmlspecialchars($row['nama_kegiatan']); ?></strong><br><small class="text-muted">Oleh: <?php echo htmlspecialchars($row['nama_guru']); ?></small></td>
                                 <td class="small"><?php echo htmlspecialchars($row['anggota_kelompok']); ?></td>
                                 <td><div class="bg-light p-2 rounded small"><strong>Hasil:</strong> <?php echo htmlspecialchars($row['hasil_kegiatan']); ?><br><strong class="text-success">RTL:</strong> <?php echo htmlspecialchars($row['rtl_konselor']); ?></div></td>
+                                <td class="text-center"><a href="detail_konseling.php?jenis=kelompok&amp;id=<?php echo (int)$row['id']; ?>" class="btn btn-sm btn-buku-detail rounded-pill px-3"><i class="bi bi-file-earmark-text"></i> Detail</a></td>
                             </tr>
                             <?php endwhile; else: ?>
-                            <tr><td colspan="4" class="text-center text-muted py-4">Belum ada data.</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted py-4">Belum ada data.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
