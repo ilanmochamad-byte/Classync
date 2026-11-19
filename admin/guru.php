@@ -9,7 +9,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $kontak = $_POST['kontak'];
     $password = $_POST['password'];
     $is_bk = isset($_POST['is_bk']) ? 1 : 0; // --- BARU:
-    
+
+    // Guru BK hanya satu, dan admin yang menentukannya lewat kotak ini
+    // (keputusan kepala sekolah, November 2026). Menu Konseling di aplikasi
+    // mengikuti kolom is_bk. Mencentang Guru BK ditolak selama guru lain
+    // masih tercentang: admin melepas centang di guru lama lebih dulu, supaya
+    // perpindahan peran BK — yang menentukan siapa mengisi jurnal BK
+    // berhonor — selalu disengaja.
+    if ($is_bk === 1) {
+        $id_ini = (isset($_POST['id']) && !empty($_POST['id'])) ? (int)$_POST['id'] : 0;
+        $stmt_bk = $conn->prepare("SELECT nama_guru FROM guru WHERE is_bk = 1 AND id <> ? ORDER BY id LIMIT 1");
+        $stmt_bk->bind_param("i", $id_ini);
+        $stmt_bk->execute();
+        $guru_bk_lain = $stmt_bk->get_result()->fetch_assoc();
+        $stmt_bk->close();
+        if ($guru_bk_lain) {
+            $pesan = "Gagal menyimpan: " . htmlspecialchars($guru_bk_lain['nama_guru'], ENT_QUOTES, 'UTF-8')
+                   . " masih tercatat sebagai Guru BK. Guru BK hanya satu; lepas centang Guru BK di data guru itu lebih dulu.";
+            $is_error = true;
+        }
+    }
+
     if (isset($_POST['id']) && !empty($_POST['id'])) {
         $id = (int)$_POST['id'];
         if (!empty($password)) {
